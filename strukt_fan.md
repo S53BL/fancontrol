@@ -5,6 +5,7 @@ fancontrol/
 ├── .gitignore
 ├── partitions_16mb_ota.csv
 ├── platformio.ini
+├── strukt_fan.md
 └── src/
     ├── config.h
     ├── display.cpp
@@ -15,13 +16,16 @@ fancontrol/
     ├── globals.h
     ├── graph_store.cpp
     ├── graph_store.h
+    ├── led.cpp
+    ├── led.h
     ├── logging.cpp
     ├── logging.h
     ├── main.cpp
     ├── sensors.cpp
     ├── sensors.h
     ├── webserver.cpp
-    └── webserver.h
+    ├── webserver.h
+    └── wifi_config.example.h
 ```
 
 ## Raw GitHub linki (src/)
@@ -37,6 +41,8 @@ fancontrol/
 | `src/globals.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/globals.h |
 | `src/graph_store.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/graph_store.cpp |
 | `src/graph_store.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/graph_store.h |
+| `src/led.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/led.cpp |
+| `src/led.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/led.h |
 | `src/logging.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/logging.cpp |
 | `src/logging.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/logging.h |
 | `src/main.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/main.cpp |
@@ -44,3 +50,4 @@ fancontrol/
 | `src/sensors.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/sensors.h |
 | `src/webserver.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/webserver.cpp |
 | `src/webserver.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/webserver.h |
+| `src/wifi_config.example.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/wifi_config.example.h |

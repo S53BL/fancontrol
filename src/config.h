@@ -109,9 +109,27 @@ enum ErrorFlag : uint8_t {
 #define FW_VERSION          "0.6.0"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
-#define PIN_RGB_LED         48      // GPIO48 — vgrajena RGB LED na TZT ESP32-S3-N16R8
+// POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
+// Preveri schematic plošče — pogosta alternativa je GPIO21.
+#define PIN_RGB_LED         21      // TODO: preveri na schematiku TZT plošče
 #define RGB_BRIGHTNESS      50      // 0–255, nizko da ne slepi
 
 // --- Boot ---
 #define BOOT_SERIAL_DELAY_MS   2000   // Čakanje po Serial.begin() za monitor
 #define BOOT_SENSOR_DELAY_MS   500    // Čakanje pred I2C init (stabilizacija napajanja)
+#define EPD_BUSY_TIMEOUT_MS    3000   // Max čakanje na BUSY LOW pri init [ms]
+
+// --- Open-Meteo vremenski API ---
+#define WEATHER_FETCH_INTERVAL  1800000UL  // 30 minut v ms
+#define WEATHER_LAT             "46.05"    // Ljubljana — nastavi po potrebi
+#define WEATHER_LON             "14.51"    // Ljubljana — nastavi po potrebi
+#define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code"
+
+// --- Peak watt avtokalibracija ---
+#define PEAK_WATT_NVS_KEY       "peakWatt"  // Ključ v NVS za persistenco
+#define PEAK_WATT_DEFAULT       15.0f       // Privzeti max [W] pri prvem zagonu
+#define PEAK_WATT_MIN_FLOOR     5.0f        // Nikoli pod 5W (varnostni floor)
+
+// --- Vremenska ikona skala ---
+#define WX_ICON_SCALE           5           // LilyGo Small=10 za 960px; mi=5 za 128px
+#define WX_ICON_LINESIZE        2           // Debelina črt ikon

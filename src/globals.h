@@ -4,6 +4,16 @@
 #include <Preferences.h>
 #include <ezTime.h>
 
+// --- Vremenski podatki (Open-Meteo) ---
+struct WeatherData {
+    float    outTemp;       // Zunanja temperatura [°C]
+    uint8_t  outHum;        // Zunanja relativna vlažnost [%]
+    uint8_t  wxCode;        // WMO weather_code (0–99)
+    bool     isNight;       // true če je ura med 22:00–06:00 (luna ikona)
+    bool     valid;         // false dokler ni prvi uspešen fetch
+    uint8_t  err;           // 0=OK, 1=HTTP napaka, 2=parse napaka
+};
+
 // --- Senzorski podatki ---
 struct SensorData {
     float    temp;      // Temperatura [°C] — SHT30
@@ -11,6 +21,7 @@ struct SensorData {
     float    volt;      // Napetost Mini PC [V] — INA219
     float    amp;       // Tok Mini PC [A] — INA219
     float    watt;      // Moč Mini PC [W] — INA219
+    float    peakWatt;  // Maksimalna izmerjena moč od zagona [W] — za bar skalo
     uint8_t  fanPct;    // Hitrost ventilatorja [%]
     bool     dndActive; // DND način aktiven
     uint8_t  err;       // Bitmask napak (ErrorFlag)
@@ -63,7 +74,10 @@ extern portMUX_TYPE dataMux;
 
 // Peak tracker (samo RAM, brez NVS)
 extern float peakTemp;    // Max temperatura od reseta
-extern float peakWatt;    // Max W od reseta
+
+// Vremenski podatki in timing
+extern WeatherData  weatherData;
+extern unsigned long lastWeatherFetchMs;
 
 // --- Funkcije ---
 void initGlobals();

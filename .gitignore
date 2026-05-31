@@ -32,6 +32,12 @@ wifi_config.h
 # Logi
 *.log
 
+# fan_last/ — kopija projekta za arhiv
+fan_last/
+
+# Skripta za pripravo fan_last/ mape
+rename_to_txt.py
+
 # OS
 .DS_Store
 Thumbs.db

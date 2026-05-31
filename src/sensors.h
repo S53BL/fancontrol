@@ -2,5 +2,6 @@
 #pragma once
 #include "config.h"
 
-bool initSensors();   // Inicializacija I2C, SHT30, INA219
-void readSensors();   // Branje in zapis v sensorData (globals)
+bool initSensors();    // Inicializacija I2C, SHT30, INA219
+void readSensors();    // Branje in zapis v sensorData (globals)
+void updatePeakWatt(); // Preveri in posodobi peak watt, shrani v NVS če nov rekord

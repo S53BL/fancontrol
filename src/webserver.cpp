@@ -15,9 +15,70 @@
 #include <Update.h>
 #include <ESPmDNS.h>
 #include <ezTime.h>
+#include <HTTPClient.h>
 #include "wifi_config.h"
 
 static AsyncWebServer server(80);
+
+// =====================================================================
+// fetchWeather — Open-Meteo API (brez API ključa), klic iz main loop
+// =====================================================================
+void fetchWeather() {
+    if (WiFi.status() != WL_CONNECTED) {
+        weatherData.err = 1;
+        LOG_WARN("WX", "fetchWeather() — WiFi ni povezan");
+        return;
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), WEATHER_URL_TEMPLATE, WEATHER_LAT, WEATHER_LON);
+
+    HTTPClient http;
+    http.begin(url);
+    http.setTimeout(8000);
+    int code = http.GET();
+
+    if (code != 200) {
+        weatherData.err = 1;
+        LOG_WARN("WX", "HTTP napaka: %d", code);
+        http.end();
+        return;
+    }
+
+    String body = http.getString();
+    http.end();
+
+    // Filter: zadrži samo "current" objekt — drastično zmanjša porabo ArduinoJson memory pool
+    StaticJsonDocument<64> filter;
+    filter["current"]["temperature_2m"]      = true;
+    filter["current"]["relative_humidity_2m"] = true;
+    filter["current"]["weather_code"]         = true;
+
+    StaticJsonDocument<256> doc;
+    DeserializationError jerr = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (jerr) {
+        weatherData.err = 2;
+        LOG_WARN("WX", "JSON parse napaka: %s", jerr.c_str());
+        return;
+    }
+
+    portENTER_CRITICAL(&dataMux);
+    weatherData.outTemp = doc["current"]["temperature_2m"]       | 0.0f;
+    weatherData.outHum  = doc["current"]["relative_humidity_2m"] | 0;
+    weatherData.wxCode  = doc["current"]["weather_code"]         | 0;
+    weatherData.valid   = true;
+    weatherData.err     = 0;
+
+    // Nočni režim (luna ikona) med 22:00 in 06:00
+    if (timeSynced) {
+        int h = myTZ.dateTime("G").toInt();
+        weatherData.isNight = (h >= 22 || h < 6);
+    }
+    portEXIT_CRITICAL(&dataMux);
+
+    LOG_INFO("WX", "Vreme OK: %.1f°C %d%% wxCode=%d",
+             weatherData.outTemp, weatherData.outHum, weatherData.wxCode);
+}
 
 // =====================================================================
 // WiFi — statični IP
@@ -478,13 +539,18 @@ void initWebserver() {
 
     // --- GET /api/data → JSON trenutnih vrednosti ---
     server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<512> doc;
+        StaticJsonDocument<768> doc;
         portENTER_CRITICAL(&dataMux);
         float temp = sensorData.temp, hum = sensorData.hum;
         float volt = sensorData.volt, amp = sensorData.amp, watt = sensorData.watt;
+        float peakWattVal = sensorData.peakWatt;
         uint8_t fan = sensorData.fanPct;
         bool dnd = sensorData.dndActive;
         uint8_t err = sensorData.err;
+        float outTemp = weatherData.outTemp;
+        uint8_t outHum = weatherData.outHum;
+        uint8_t wxCode = weatherData.wxCode;
+        bool wxValid = weatherData.valid;
         portEXIT_CRITICAL(&dataMux);
 
         doc["temp"]      = serialized(String(temp, 1));
@@ -495,7 +561,11 @@ void initWebserver() {
         doc["fan"]       = fan;
         doc["dnd"]       = dnd;
         doc["peak_temp"] = serialized(String(peakTemp, 1));
-        doc["peak_watt"] = serialized(String(peakWatt, 1));
+        doc["peak_watt"] = serialized(String(peakWattVal, 1));
+        doc["out_temp"]  = serialized(String(outTemp, 1));
+        doc["out_hum"]   = outHum;
+        doc["wx_code"]   = wxCode;
+        doc["wx_valid"]  = wxValid;
 
         char tbuf[10];
         getTimeStr(tbuf, sizeof(tbuf));

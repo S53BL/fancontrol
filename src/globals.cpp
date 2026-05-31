@@ -25,7 +25,10 @@ portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 
 // --- Peak tracker (samo RAM, brez NVS) ---
 float peakTemp = -999.0f;
-float peakWatt = 0.0f;
+
+// --- Vremenski podatki ---
+WeatherData  weatherData   = { 0.0f, 0, 0, false, false, 0 };
+unsigned long lastWeatherFetchMs = 0;
 
 // =============================================================================
 // CRC16 za NVS zaščito
@@ -138,6 +141,13 @@ void initGlobals() {
     lastDisplayRefreshMs   = 0;
     lastWifiCheckMs        = 0;
     lastNtpSyncMs          = 0;
+
+    // Peak watt — naloži iz NVS (persistentna vrednost)
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, true);
+    sensorData.peakWatt = prefs.getFloat(PEAK_WATT_NVS_KEY, PEAK_WATT_DEFAULT);
+    if (sensorData.peakWatt < PEAK_WATT_MIN_FLOOR) sensorData.peakWatt = PEAK_WATT_DEFAULT;
+    prefs.end();
 
     Serial.println("[Globals] Init OK");
 }

@@ -17,18 +17,20 @@
 #include "led.h"
 
 void setup() {
-    // 1. LED — takoj na začetku (modra = boot v teku)
-    ledInit();
-    ledBlue();
-
-    // 2. Serial — z zamudo da monitor uspe prikazati začetek
+    // 1. Serial — mora biti prvi, da vidimo LED diagnostiko pri bootanju
     Serial.begin(SERIAL_BAUD);
-    delay(BOOT_SERIAL_DELAY_MS);
+    delay(200);
     Serial.println("\n\n=== fancontrol boot ===");
     Serial.printf("FW: %s | Flash: %dMB | PSRAM: %dMB\n",
                   FW_VERSION,
                   ESP.getFlashChipSize() / (1024*1024),
                   ESP.getPsramSize()     / (1024*1024));
+
+    // 2. LED (modra = boot v teku)
+    Serial.printf("[LED] Init na GPIO%d\n", PIN_RGB_LED);
+    ledInit();
+    ledBlue();
+    Serial.println("[LED] Blue OK");
 
     // 3. Logging (mora biti pred vsem kar logira)
     logInit();
@@ -39,6 +41,9 @@ void setup() {
     LOG_INFO("BOOT", "Globals OK");
 
     // 5. Graf buffer (PSRAM)
+    if (!psramFound()) {
+        LOG_WARN("BOOT", "PSRAM ni dostopen — graf buffer bo na heap");
+    }
     graphStoreInit();
     LOG_INFO("BOOT", "Graph store OK (%d entries)", GRAPH_BUFFER_SIZE);
 
@@ -57,9 +62,8 @@ void setup() {
     }
 
     // 8. ePaper zaslon
-    initDisplay();
-    if (sensorData.err & ERR_DISPLAY) {
-        LOG_WARN("BOOT", "ePaper: ni priključen ali napaka");
+    if (!initDisplay()) {
+        LOG_WARN("BOOT", "ePaper: ni priključen ali BUSY timeout — nadaljujem brez zaslona");
     } else {
         LOG_INFO("BOOT", "ePaper OK");
     }
@@ -117,17 +121,21 @@ void loop() {
         portEXIT_CRITICAL(&dataMux);
         graphAddPoint(pt);
 
-        // Peak tracker
+        // Peak temp tracker
         if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
             peakTemp = sensorData.temp;
-        if (sensorData.watt > peakWatt)
-            peakWatt = sensorData.watt;
     }
 
     // ePaper osvežitev
     if (now - lastDisplayRefreshMs >= DISPLAY_REFRESH_INTERVAL) {
         lastDisplayRefreshMs = now;
         updateDisplay();
+    }
+
+    // Weather fetch — vsakih 30 minut (Core 0 WiFi stack)
+    if (millis() - lastWeatherFetchMs >= WEATHER_FETCH_INTERVAL || lastWeatherFetchMs == 0) {
+        lastWeatherFetchMs = millis();
+        fetchWeather();
     }
 
     handleWebserver(); // mDNS + NTP re-sync + WiFi watchdog

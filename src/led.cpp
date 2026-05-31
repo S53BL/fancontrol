@@ -1,5 +1,5 @@
 // led.cpp — Implementacija RGB LED
-// Uporablja Adafruit NeoPixel knjižnjico (1 LED, GPIO38)
+// Uporablja Adafruit NeoPixel knjižnjico (1 LED, pin iz config.h PIN_RGB_LED)
 // NeoPixel je WS2812B kompatibilen — 3-žilni protokol
 
 #include "led.h"

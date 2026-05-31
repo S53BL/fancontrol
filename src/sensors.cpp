@@ -8,6 +8,7 @@
 #include <Adafruit_SHT31.h>
 #include <Adafruit_INA219.h>
 #include <Wire.h>
+#include <Preferences.h>
 
 static Adafruit_SHT31  sht30;
 static Adafruit_INA219 ina219(ADDR_INA219);
@@ -120,10 +121,29 @@ void readSensors() {
             sensorData.watt = calcWatt;
             sensorData.err &= ~ERR_INA219;
             portEXIT_CRITICAL(&dataMux);
+            updatePeakWatt();
         }
     }
 
     portENTER_CRITICAL(&dataMux);
     newSensorData = true;
     portEXIT_CRITICAL(&dataMux);
+}
+
+// Peak watt avtokalibracija — kliče se po vsakem INA219 branju
+void updatePeakWatt() {
+    float current = sensorData.watt;
+
+    if (current < PEAK_WATT_MIN_FLOOR) return;
+
+    if (current > sensorData.peakWatt) {
+        sensorData.peakWatt = current;
+
+        Preferences prefs;
+        prefs.begin(NVS_NAMESPACE, false);
+        prefs.putFloat(PEAK_WATT_NVS_KEY, sensorData.peakWatt);
+        prefs.end();
+
+        LOG_INFO("SENS", "Nov peak watt: %.1f W (shranjeno v NVS)", sensorData.peakWatt);
+    }
 }
