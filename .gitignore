@@ -14,6 +14,11 @@ doc/
 # Agent navodila (lokalna, ne v repo)
 AGENT_*.md
 
+# Dokumentacija projekta — lokalno, ne v repo
+CHANGELOG.md
+decisions.md
+to-do.md
+
 # Občutljive datoteke — KRITIČNO
 src/wifi_config.h
 wifi_config.h
