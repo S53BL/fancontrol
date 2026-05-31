@@ -1,0 +1,13 @@
+# Changelog — fancontrol
+
+## [0.1.0] — 2026-05-31
+### Dodano
+- Skelet projekta: platformio.ini, particijska tabela, vse src/ datoteke
+- config.h: pinout TZT ESP32-S3-N16R8, konstante, enumi
+- globals.h/cpp: SensorData, Settings, NVS load/save z CRC16
+- sensors.h/cpp: skeleton SHT30 + INA219
+- fan.h/cpp: skeleton PWM krmiljenje, temperaturna krivulja
+- display.h/cpp: skeleton GxEPD2 WeAct 2.9" B/W
+- webserver.h/cpp: skeleton AsyncWebServer, buildPage(), API endpointi
+- graph_store.h/cpp: krožni PSRAM buffer, GraphPoint struktura
+- main.cpp: setup/loop skeleton, timing logika

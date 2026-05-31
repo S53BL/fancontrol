@@ -1,0 +1,57 @@
+// globals.h — Globalne spremenljivke za fancontrol
+#pragma once
+#include "config.h"
+#include <Preferences.h>
+#include <ezTime.h>
+
+// --- Senzorski podatki ---
+struct SensorData {
+    float    temp;      // Temperatura [°C] — SHT30
+    float    hum;       // Relativna vlažnost [%] — SHT30
+    float    volt;      // Napetost Mini PC [V] — INA219
+    float    amp;       // Tok Mini PC [A] — INA219
+    float    watt;      // Moč Mini PC [W] — INA219
+    uint8_t  fanPct;    // Hitrost ventilatorja [%]
+    bool     dndActive; // DND način aktiven
+    uint8_t  err;       // Bitmask napak (ErrorFlag)
+};
+
+// --- Nastavitve (NVS) ---
+struct Settings {
+    // WiFi
+    char     ssid[32];
+    char     password[64];
+    // Temperaturna krivulja (4 točke)
+    float    curveTemp[FAN_CURVE_POINTS];
+    uint8_t  curvePct[FAN_CURVE_POINTS];
+    // DND
+    bool     dndEnabled;
+    uint8_t  dndFrom;   // ura 0–23
+    uint8_t  dndTo;     // ura 0–23
+    uint8_t  dndMaxPct; // max % med DND
+    // Minimalna hitrost
+    uint8_t  fanMinPct;
+};
+
+// --- Extern deklaracije ---
+extern SensorData sensorData;
+extern Settings   settings;
+extern Timezone   myTZ;
+extern bool       timeSynced;
+extern bool       newSensorData;
+
+// Timing
+extern unsigned long lastSensorReadMs;
+extern unsigned long lastGraphStoreMs;
+extern unsigned long lastDisplayRefreshMs;
+extern unsigned long lastWifiCheckMs;
+extern unsigned long lastNtpSyncMs;
+
+// Mutex za thread-safety (Core 0 = web, Core 1 = senzorji/fan)
+extern portMUX_TYPE dataMux;
+
+// --- Funkcije ---
+void initGlobals();
+void loadSettings();
+void saveSettings();
+void resetSettings();

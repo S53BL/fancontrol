@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/PlatformIO/Projekti/vent_SEW/**)",
+      "Read(//c/PlatformIO/Projekti/vent_SEW/src/**)"
+    ]
+  }
+}
