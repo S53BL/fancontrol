@@ -46,8 +46,9 @@ void readSensors() {
 
     portENTER_CRITICAL(&dataMux);
     if (sht30ok) {
-        sensorData.temp = t;
-        sensorData.hum  = h;
+        // Kalibracija SHT30 — offset iz nastavitev
+        sensorData.temp = t + settings.tempOffset;
+        sensorData.hum  = constrain(h + settings.humOffset, 0.0f, 100.0f);
         sensorData.err &= ~ERR_SHT30;
     } else {
         // Prejšnja vrednost ostane, samo flag
@@ -71,9 +72,10 @@ void readSensors() {
 
     portENTER_CRITICAL(&dataMux);
     if (ina219ok) {
+        // Kalibracija INA219 — korekcija toka iz nastavitev
         sensorData.volt = busV;
-        sensorData.amp  = currA;
-        sensorData.watt = watt;
+        sensorData.amp  = currA * settings.currentCorr;
+        sensorData.watt = sensorData.volt * sensorData.amp;
         sensorData.err &= ~ERR_INA219;
     } else {
         // Prejšnje vrednosti ostanejo, samo flag

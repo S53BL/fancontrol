@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "globals.h"
+#include "logging.h"
 #include "sensors.h"
 #include "fan.h"
 #include "display.h"
@@ -19,12 +20,13 @@ void setup() {
     delay(200);
     Serial.println("\n=== fancontrol boot ===");
 
-    initGlobals();       // NVS settings + sensorData init
-    graphStoreInit();    // PSRAM buffer
-    initFan();           // PWM init — ventilator na 0%
-    initSensors();       // I2C + SHT30 + INA219
-    initDisplay();       // ePaper init
-    initWebserver();     // WiFi + NTP + AsyncWebServer
+    logInit();            // MORA biti prvi — ostale init funkcije že logirajo
+    initGlobals();        // NVS settings + sensorData init
+    graphStoreInit();     // PSRAM buffer
+    initFan();            // PWM init — ventilator na 0%
+    initSensors();        // I2C + SHT30 + INA219
+    initDisplay();        // ePaper init
+    initWebserver();      // WiFi + NTP + AsyncWebServer
 
     Serial.println("=== Boot complete ===");
 }
@@ -54,6 +56,12 @@ void loop() {
         pt.fanPct = sensorData.fanPct;
         portEXIT_CRITICAL(&dataMux);
         graphAddPoint(pt);
+
+        // Peak tracker
+        if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
+            peakTemp = sensorData.temp;
+        if (sensorData.watt > peakWatt)
+            peakWatt = sensorData.watt;
     }
 
     // ePaper osvežitev
@@ -62,12 +70,6 @@ void loop() {
         updateDisplay();
     }
 
-    // WiFi watchdog
-    if (now - lastWifiCheckMs >= WIFI_CHECK_INTERVAL) {
-        lastWifiCheckMs = now;
-        // TODO: reconnect če ni WiFi
-    }
-
-    handleWebserver(); // mDNS
+    handleWebserver(); // mDNS + NTP re-sync + WiFi watchdog
     delay(10);
 }

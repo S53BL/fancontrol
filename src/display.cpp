@@ -6,13 +6,12 @@
 #include <U8g2_for_Adafruit_GFX.h>
 #include <SPI.h>
 
-// Font aliasi — tehno stil
-// Opomba: _mr fonti so ASCII-only (0x20–0x7E). Za ° in Č zamenjaj z _mf variantami.
-#define FONT_LABEL  u8g2_font_profont10_mr
+// Font aliasi — tehno stil (_mf: Extended Latin, podpora za °C in Č)
+#define FONT_LABEL  u8g2_font_profont10_mf
 #define FONT_VALUE  u8g2_font_logisoso16_tf
 #define FONT_TIME   u8g2_font_logisoso28_tf
-#define FONT_DAY    u8g2_font_profont17_mr
-#define FONT_UNIT   u8g2_font_profont10_mr
+#define FONT_DAY    u8g2_font_profont17_mf
+#define FONT_UNIT   u8g2_font_profont10_mf
 
 // DEPG0290BS, 128×296px, SSD1680 — pokončna orientacija
 GxEPD2_BW<GxEPD2_290_BS, GxEPD2_290_BS::HEIGHT> display(

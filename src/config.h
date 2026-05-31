@@ -91,3 +91,17 @@ enum ErrorFlag : uint8_t {
 
 // --- Sentinel vrednosti ---
 #define ERR_FLOAT   -999.0f
+
+// --- Logging ---
+#define LOG_BUFFER_ENTRIES  200        // Število vnosov v RAM log bufferju (PSRAM)
+#define LOG_MAX_MSG_LEN     120        // Max dolžina enega log sporočila
+
+// --- Mreža ---
+#define STATIC_IP           "192.168.2.169"
+#define STATIC_GW           "192.168.2.1"
+#define STATIC_SUBNET       "255.255.255.0"
+#define STATIC_DNS          "8.8.8.8"
+#define MDNS_HOSTNAME       "fancontrol"   // http://fancontrol.local
+
+// --- Firmware verzija ---
+#define FW_VERSION          "0.5.0"

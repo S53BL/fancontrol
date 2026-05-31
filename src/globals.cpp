@@ -23,6 +23,10 @@ unsigned long lastNtpSyncMs        = 0;
 // --- Mutex za thread-safety ---
 portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 
+// --- Peak tracker (samo RAM, brez NVS) ---
+float peakTemp = -999.0f;
+float peakWatt = 0.0f;
+
 // =============================================================================
 // CRC16 za NVS zaščito
 // =============================================================================
@@ -52,6 +56,12 @@ static void initDefaults() {
     settings.curvePct[1]  = FAN_CURVE_PCT_1;
     settings.curvePct[2]  = FAN_CURVE_PCT_2;
     settings.curvePct[3]  = FAN_CURVE_PCT_3;
+
+    settings.tempOffset   = 0.0f;
+    settings.humOffset    = 0.0f;
+    settings.shuntOhms    = 0.1f;
+    settings.currentCorr  = 1.0f;
+    settings.fanMaxDayPct = 100;
 
     settings.dndEnabled = false;
     settings.dndFrom    = FAN_DND_HOUR_FROM;

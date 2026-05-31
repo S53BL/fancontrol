@@ -31,6 +31,17 @@ struct Settings {
     uint8_t  dndMaxPct; // max % med DND
     // Minimalna hitrost
     uint8_t  fanMinPct;
+
+    // Kalibracija SHT30
+    float    tempOffset;      // Temperaturni offset [°C], privzeto 0.0
+    float    humOffset;       // Vlažnostni offset [%], privzeto 0.0
+
+    // Kalibracija INA219
+    float    shuntOhms;       // Vrednost shunt upora [Ω], privzeto 0.1
+    float    currentCorr;     // Korekcijski faktor toka, privzeto 1.0
+
+    // Ventilator — razširjeno
+    uint8_t  fanMaxDayPct;    // Max hitrost podnevi [%], privzeto 100
 };
 
 // --- Extern deklaracije ---
@@ -49,6 +60,10 @@ extern unsigned long lastNtpSyncMs;
 
 // Mutex za thread-safety (Core 0 = web, Core 1 = senzorji/fan)
 extern portMUX_TYPE dataMux;
+
+// Peak tracker (samo RAM, brez NVS)
+extern float peakTemp;    // Max temperatura od reseta
+extern float peakWatt;    // Max W od reseta
 
 // --- Funkcije ---
 void initGlobals();
