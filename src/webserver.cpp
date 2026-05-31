@@ -30,18 +30,35 @@ static void connectWiFi() {
     sn.fromString(STATIC_SUBNET);
     dns.fromString(STATIC_DNS);
     WiFi.config(ip, gw, sn, dns);
-    const char* ssid = (strlen(settings.ssid) > 0) ? settings.ssid : WIFI_SSID;
-    const char* pass = (strlen(settings.password) > 0) ? settings.password : WIFI_PASSWORD;
-    WiFi.begin(ssid, pass);
-    LOG_INFO("WIFI", "Connecting: ssid=%s source=%s",
-             ssid, (strlen(settings.ssid) > 0) ? "NVS" : "wifi_config.h");
-    unsigned long t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
-        delay(300);
+
+    // Najprej NVS (če je shranjeno)
+    if (strlen(settings.ssid) > 0) {
+        LOG_INFO("WIFI", "Connecting (NVS): %s", settings.ssid);
+        WiFi.begin(settings.ssid, settings.password);
+        unsigned long t0 = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) delay(300);
+        if (WiFi.status() != WL_CONNECTED) {
+            LOG_WARN("WIFI", "NVS omrezje ni dosegljivo — poskusam seznam");
+            WiFi.disconnect();
+        }
     }
+
+    // Fallback — poskusi vsako omrežje iz wifi_config.h po vrsti
+    if (WiFi.status() != WL_CONNECTED) {
+        for (int i = 0; i < WIFI_NETWORK_COUNT; i++) {
+            LOG_INFO("WIFI", "Connecting [%d/%d]: %s", i + 1, WIFI_NETWORK_COUNT, WIFI_SSID_LIST[i]);
+            WiFi.begin(WIFI_SSID_LIST[i], WIFI_PASS_LIST[i]);
+            unsigned long t0 = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(300);
+            if (WiFi.status() == WL_CONNECTED) break;
+            WiFi.disconnect();
+        }
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
         LOG_INFO("WIFI", "Connected. IP: %s RSSI: %d dBm",
                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        sensorData.err &= ~ERR_WIFI;
     } else {
         LOG_WARN("WIFI", "Connect failed — brez omrezja");
         sensorData.err |= ERR_WIFI;
