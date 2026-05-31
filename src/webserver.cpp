@@ -15,6 +15,7 @@
 #include <Update.h>
 #include <ESPmDNS.h>
 #include <ezTime.h>
+#include "wifi_config.h"
 
 static AsyncWebServer server(80);
 
@@ -29,9 +30,11 @@ static void connectWiFi() {
     sn.fromString(STATIC_SUBNET);
     dns.fromString(STATIC_DNS);
     WiFi.config(ip, gw, sn, dns);
-    WiFi.begin(settings.ssid, settings.password);
-
-    LOG_INFO("WIFI", "Connecting to %s (static IP: %s)", settings.ssid, STATIC_IP);
+    const char* ssid = (strlen(settings.ssid) > 0) ? settings.ssid : WIFI_SSID;
+    const char* pass = (strlen(settings.password) > 0) ? settings.password : WIFI_PASSWORD;
+    WiFi.begin(ssid, pass);
+    LOG_INFO("WIFI", "Connecting: ssid=%s source=%s",
+             ssid, (strlen(settings.ssid) > 0) ? "NVS" : "wifi_config.h");
     unsigned long t0 = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
         delay(300);
@@ -50,7 +53,8 @@ static void connectWiFi() {
 // =====================================================================
 static void syncNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
-    configTime(0, 0, "pool.ntp.org", "time.google.com");
+    // Čisti ezTime pristop — brez mešanja s configTime()
+    setServer("pool.ntp.org");
     myTZ.setLocation(F("Europe/Ljubljana"));
     waitForSync(10);
     if (timeStatus() != timeNotSet) {
@@ -58,7 +62,8 @@ static void syncNTP() {
         lastNtpSyncMs = millis();
         LOG_INFO("NTP", "Synced: %s", myTZ.dateTime("d.m.Y H:i:s").c_str());
     } else {
-        LOG_WARN("NTP", "Sync timeout");
+        LOG_WARN("NTP", "Sync timeout — brez NTP");
+        sensorData.err |= ERR_NTP;
     }
 }
 

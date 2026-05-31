@@ -15,12 +15,14 @@
 #define PIN_I2C_SCL         9
 
 // --- SPI bus — ePaper WeAct 2.9" B/W ---
-#define PIN_EPD_MOSI        11
-#define PIN_EPD_CLK         12
-#define PIN_EPD_CS          10
-#define PIN_EPD_DC          13
-#define PIN_EPD_RST         14
-#define PIN_EPD_BUSY        15
+// WeAct pin connector vrstni red: 1=BUSY 2=RES 3=D/C 4=CS 5=SCL 6=SDA 7=GND 8=VCC
+// POZOR: WeAct poimenuje SPI pine z I2C imeni: SDA=MOSI, SCL=CLK
+#define PIN_EPD_BUSY        15   // WeAct pin 1 — Busy signal (čakanje na refresh)
+#define PIN_EPD_RST         14   // WeAct pin 2 — Reset (RES, aktiven LOW)
+#define PIN_EPD_DC          13   // WeAct pin 3 — Data/Command
+#define PIN_EPD_CS          10   // WeAct pin 4 — Chip select (aktiven LOW)
+#define PIN_EPD_CLK         12   // WeAct pin 5 — SPI clock (SCL=CLK)
+#define PIN_EPD_MOSI        11   // WeAct pin 6 — SPI data (SDA=MOSI)
 
 // --- Ventilator PWM → LR7843 MOSFET modul ---
 #define PIN_FAN_PWM         5
