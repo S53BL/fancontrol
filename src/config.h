@@ -106,4 +106,12 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fancontrol"   // http://fancontrol.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "0.5.0"
+#define FW_VERSION          "0.6.0"
+
+// --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
+#define PIN_RGB_LED         48      // GPIO48 — vgrajena RGB LED na TZT ESP32-S3-N16R8
+#define RGB_BRIGHTNESS      50      // 0–255, nizko da ne slepi
+
+// --- Boot ---
+#define BOOT_SERIAL_DELAY_MS   2000   // Čakanje po Serial.begin() za monitor
+#define BOOT_SENSOR_DELAY_MS   500    // Čakanje pred I2C init (stabilizacija napajanja)

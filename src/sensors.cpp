@@ -1,6 +1,10 @@
-// sensors.cpp — Implementacija branja SHT30 in INA219
+// sensors.cpp — Branje SHT30 in INA219 z graceful degradation
+// Če senzor ni priključen ali ne odgovori → nastavi ERR flag, preskoči branje
+// Koda se nikoli ne sesuje zaradi manjkajočega senzorja
+
 #include "sensors.h"
 #include "globals.h"
+#include "logging.h"
 #include <Adafruit_SHT31.h>
 #include <Adafruit_INA219.h>
 #include <Wire.h>
@@ -8,87 +12,118 @@
 static Adafruit_SHT31  sht30;
 static Adafruit_INA219 ina219(ADDR_INA219);
 
-bool initSensors() {
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+// Stanje inicializacije — nastavljeno enkrat v initSensors()
+static bool _sht30Ok  = false;
+static bool _ina219Ok = false;
 
-    bool ok = true;
-
-    if (!sht30.begin(ADDR_SHT30)) {
-        Serial.println("[Sensors] SHT30 ni najden!");
-        portENTER_CRITICAL(&dataMux);
-        sensorData.err |= ERR_SHT30;
-        portEXIT_CRITICAL(&dataMux);
-        ok = false;
-    } else {
-        Serial.println("[Sensors] SHT30 OK");
-    }
-
-    if (!ina219.begin()) {
-        Serial.println("[Sensors] INA219 ni najden!");
-        portENTER_CRITICAL(&dataMux);
-        sensorData.err |= ERR_INA219;
-        portEXIT_CRITICAL(&dataMux);
-        ok = false;
-    } else {
-        Serial.println("[Sensors] INA219 OK");
-    }
-
-    return ok;
+// --- Pomožna: I2C scan za en naslov ---
+static bool i2cDevicePresent(uint8_t addr) {
+    Wire.beginTransmission(addr);
+    return (Wire.endTransmission() == 0);
 }
 
-void readSensors() {
-    // --- SHT30: temperatura in vlažnost ---
-    float t = sht30.readTemperature();
-    float h = sht30.readHumidity();
+// --- Inicializacija ---
+bool initSensors() {
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    delay(50); // kratka stabilizacija busa
 
-    bool sht30ok = !isnan(t) && !isnan(h) && (t >= -20.0f) && (t <= 80.0f)
-                                           && (h >=   0.0f) && (h <= 100.0f);
-
-    portENTER_CRITICAL(&dataMux);
-    if (sht30ok) {
-        // Kalibracija SHT30 — offset iz nastavitev
-        sensorData.temp = t + settings.tempOffset;
-        sensorData.hum  = constrain(h + settings.humOffset, 0.0f, 100.0f);
-        sensorData.err &= ~ERR_SHT30;
-    } else {
-        // Prejšnja vrednost ostane, samo flag
+    // SHT30
+    if (!i2cDevicePresent(ADDR_SHT30)) {
+        LOG_WARN("SENS", "SHT30 ni najden na I2C 0x%02X", ADDR_SHT30);
+        portENTER_CRITICAL(&dataMux);
         sensorData.err |= ERR_SHT30;
-    }
-    portEXIT_CRITICAL(&dataMux);
-
-    if (sht30ok) {
-        Serial.printf("[Sensors] SHT30: %.1f°C  %.1f%%\n", t, h);
+        sensorData.temp = ERR_FLOAT;
+        sensorData.hum  = ERR_FLOAT;
+        portEXIT_CRITICAL(&dataMux);
+        _sht30Ok = false;
+    } else if (!sht30.begin(ADDR_SHT30)) {
+        LOG_ERROR("SENS", "SHT30 begin() napaka");
+        portENTER_CRITICAL(&dataMux);
+        sensorData.err |= ERR_SHT30;
+        portEXIT_CRITICAL(&dataMux);
+        _sht30Ok = false;
     } else {
-        Serial.println("[Sensors] SHT30: napaka branja");
+        LOG_INFO("SENS", "SHT30 OK na 0x%02X", ADDR_SHT30);
+        _sht30Ok = true;
     }
 
-    // --- INA219: napetost, tok, moč ---
-    float busV  = ina219.getBusVoltage_V();
-    float currA = ina219.getCurrent_mA() / 1000.0f;
-    float watt  = busV * currA;
+    // INA219
+    if (!i2cDevicePresent(ADDR_INA219)) {
+        LOG_WARN("SENS", "INA219 ni najden na I2C 0x%02X", ADDR_INA219);
+        portENTER_CRITICAL(&dataMux);
+        sensorData.err |= ERR_INA219;
+        sensorData.volt = ERR_FLOAT;
+        sensorData.amp  = ERR_FLOAT;
+        sensorData.watt = ERR_FLOAT;
+        portEXIT_CRITICAL(&dataMux);
+        _ina219Ok = false;
+    } else if (!ina219.begin()) {
+        LOG_ERROR("SENS", "INA219 begin() napaka");
+        portENTER_CRITICAL(&dataMux);
+        sensorData.err |= ERR_INA219;
+        portEXIT_CRITICAL(&dataMux);
+        _ina219Ok = false;
+    } else {
+        LOG_INFO("SENS", "INA219 OK na 0x%02X", ADDR_INA219);
+        _ina219Ok = true;
+    }
 
-    // Validacija: Mini PC 12V veja — razumna napetost 8–15V
-    bool ina219ok = (busV >= 8.0f) && (busV <= 15.0f);
+    return true; // vedno vrne true — napake so v ERR flagih
+}
+
+// --- Branje senzorjev ---
+void readSensors() {
+
+    // SHT30 — preskoči če ni inicializiran
+    if (_sht30Ok) {
+        float rawTemp = sht30.readTemperature();
+        float rawHum  = sht30.readHumidity();
+
+        if (isnan(rawTemp) || rawTemp < -20.0f || rawTemp > 80.0f) {
+            LOG_WARN("SENS", "SHT30 temp izven obsega: %.1f", rawTemp);
+            portENTER_CRITICAL(&dataMux);
+            sensorData.err |= ERR_SHT30;
+            portEXIT_CRITICAL(&dataMux);
+        } else if (isnan(rawHum) || rawHum < 0.0f || rawHum > 100.0f) {
+            LOG_WARN("SENS", "SHT30 vlaga izven obsega: %.1f", rawHum);
+            portENTER_CRITICAL(&dataMux);
+            sensorData.err |= ERR_SHT30;
+            portEXIT_CRITICAL(&dataMux);
+        } else {
+            portENTER_CRITICAL(&dataMux);
+            sensorData.temp = rawTemp + settings.tempOffset;
+            sensorData.hum  = constrain(rawHum + settings.humOffset, 0.0f, 100.0f);
+            sensorData.err &= ~ERR_SHT30;
+            portEXIT_CRITICAL(&dataMux);
+        }
+    }
+
+    // INA219 — preskoči če ni inicializiran
+    if (_ina219Ok) {
+        float rawVolt = ina219.getBusVoltage_V();
+        float rawAmp  = ina219.getCurrent_mA() / 1000.0f;
+
+        if (rawVolt < 8.0f || rawVolt > 15.0f) {
+            // Mini PC ni priključen ali izven obsega — ni napaka, normalno stanje
+            portENTER_CRITICAL(&dataMux);
+            sensorData.volt = rawVolt;   // vseeno zapiši za debug
+            sensorData.amp  = 0.0f;
+            sensorData.watt = 0.0f;
+            sensorData.err &= ~ERR_INA219;
+            portEXIT_CRITICAL(&dataMux);
+        } else {
+            float corrAmp  = rawAmp * settings.currentCorr;
+            float calcWatt = rawVolt * corrAmp;
+            portENTER_CRITICAL(&dataMux);
+            sensorData.volt = rawVolt;
+            sensorData.amp  = corrAmp;
+            sensorData.watt = calcWatt;
+            sensorData.err &= ~ERR_INA219;
+            portEXIT_CRITICAL(&dataMux);
+        }
+    }
 
     portENTER_CRITICAL(&dataMux);
-    if (ina219ok) {
-        // Kalibracija INA219 — korekcija toka iz nastavitev
-        sensorData.volt = busV;
-        sensorData.amp  = currA * settings.currentCorr;
-        sensorData.watt = sensorData.volt * sensorData.amp;
-        sensorData.err &= ~ERR_INA219;
-    } else {
-        // Prejšnje vrednosti ostanejo, samo flag
-        sensorData.err |= ERR_INA219;
-    }
-    portEXIT_CRITICAL(&dataMux);
-
-    if (ina219ok) {
-        Serial.printf("[Sensors] INA219: %.2fV  %.3fA  %.2fW\n", busV, currA, watt);
-    } else {
-        Serial.printf("[Sensors] INA219: napaka (bus=%.2fV)\n", busV);
-    }
-
-    // Označi nova data — vedno, ne glede na napake posameznih senzorjev
     newSensorData = true;
+    portEXIT_CRITICAL(&dataMux);
 }

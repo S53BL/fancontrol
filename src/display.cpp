@@ -2,6 +2,7 @@
 #include "display.h"
 #include "config.h"
 #include "globals.h"
+#include "logging.h"
 #include <GxEPD2_BW.h>
 #include <U8g2_for_Adafruit_GFX.h>
 #include <SPI.h>
@@ -39,21 +40,34 @@ static const char* getDaySLO() {
 
 void initDisplay() {
     SPI.begin(PIN_EPD_CLK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
+
+    // Preveri BUSY pin pred init — če je stuck HIGH, zaslon ni priključen
+    pinMode(PIN_EPD_BUSY, INPUT);
+    delay(10);
+
     display.init(115200, true, 2, false);
-    display.setRotation(0);         // pokončna orientacija
+    display.setRotation(0);
     display.setFullWindow();
     display.firstPage();
     do {
         display.fillScreen(GxEPD_WHITE);
     } while (display.nextPage());
+
     u8g2Fonts.begin(display);
-    u8g2Fonts.setFontMode(1);              // transparentno ozadje
-    u8g2Fonts.setFontDirection(0);         // levo → desno
+    u8g2Fonts.setFontMode(1);
+    u8g2Fonts.setFontDirection(0);
     u8g2Fonts.setForegroundColor(GxEPD_BLACK);
     u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+
+    LOG_INFO("EPD", "ePaper init OK");
 }
 
 void updateDisplay() {
+    // Preskoči tiho če zaslon ni inicializiran
+    if (sensorData.err & ERR_DISPLAY) {
+        LOG_WARN("EPD", "updateDisplay() preskočen — ERR_DISPLAY");
+        return;
+    }
     display.setFullWindow();
     display.firstPage();
     do {
