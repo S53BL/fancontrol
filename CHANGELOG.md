@@ -1,5 +1,11 @@
 # Changelog — fancontrol
 
+## [0.1.1] — 2026-05-31
+### Spremenjeno
+- .gitignore: razširjen (dodano .claude/, .vscode/, Doc/, AGENT_*.md, wifi_config.h, build artefakti)
+- .gitignore: odstranjeno sledenje že-trackanim mapam (.claude/, .vscode/, Doc/, AGENT_*.md, to-do.md, decisions.md)
+- platformio.ini: odstranjen [env:esp32s3_debug] — samo en build environment
+
 ## [0.1.0] — 2026-05-31
 ### Dodano
 - Skelet projekta: platformio.ini, particijska tabela, vse src/ datoteke
