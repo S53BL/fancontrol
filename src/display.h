@@ -1,6 +1,5 @@
 // display.h — GxEPD2 ePaper WeAct 2.9" B/W
 #pragma once
 
-void initDisplay();    // Inicializacija GxEPD2
-void updateDisplay();  // Full refresh zaslona
-void partialDisplay(); // Partial refresh (če podprt)
+void initDisplay();    // GxEPD2 init, SPI, U8g2 init, bel zaslon
+void updateDisplay();  // Full refresh — vse 4 cone

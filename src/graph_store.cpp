@@ -1,8 +1,7 @@
 // graph_store.cpp — Implementacija krožnega bufferja v PSRAM
-// Vzorec: vent_SEW graph_store.cpp (krožni buffer, head/count logika)
-// PSRAM alokacija: ps_malloc() — ne navadni malloc()!
 #include "graph_store.h"
 #include "config.h"
+#include "globals.h"
 #include <Arduino.h>
 
 static GraphPoint* _buf   = nullptr;
@@ -28,9 +27,11 @@ void graphStoreInit() {
 
 void graphAddPoint(const GraphPoint& pt) {
     if (!_buf) return;
+    portENTER_CRITICAL(&dataMux);
     _buf[_head] = pt;
     _head = (_head + 1) % GRAPH_BUFFER_SIZE;
     if (_count < GRAPH_BUFFER_SIZE) _count++;
+    portEXIT_CRITICAL(&dataMux);
 }
 
 GraphPoint graphGetPoint(int index) {
@@ -40,6 +41,11 @@ GraphPoint graphGetPoint(int index) {
     return _buf[realIdx];
 }
 
-int graphGetCount() { return _count; }
+int graphGetCount() {
+    portENTER_CRITICAL(&dataMux);
+    int cnt = _count;
+    portEXIT_CRITICAL(&dataMux);
+    return cnt;
+}
 
 void graphStoreClear() { _head = 0; _count = 0; }
