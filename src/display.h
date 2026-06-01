@@ -4,7 +4,9 @@
 
 bool initDisplay();    // GxEPD2 init, SPI, U8g2 init, bel zaslon; false = ni priključen/BUSY timeout
 void showBootScreen(); // Zagonski ekran z QR kodo, IP, mDNS, monitor IP
-void updateDisplay();  // Full refresh — 3 cone (čas+vreme / senzorji+fan / napajanje)
+// fullRefresh=true  → setFullWindow (počisti ghosting, z inverznim flashom)
+// fullRefresh=false → setPartialWindow cel zaslon (brez flasha, privzeto)
+void updateDisplay(bool fullRefresh = false);
 
 // Vremenske ikone (adaptirane iz G6EJD/LilyGo projekta, scale=WX_ICON_SCALE)
 void wxDrawConditions(int x, int y, uint8_t wxCode, bool isNight);

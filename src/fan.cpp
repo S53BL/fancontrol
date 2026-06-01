@@ -3,6 +3,7 @@
 #include "globals.h"
 #include "logging.h"
 #include "fan_adapt.h"
+#include "fan_boost.h"
 #include <Arduino.h>
 
 static uint8_t _fanPct = 0;
@@ -114,9 +115,22 @@ void updateFan() {
     // Minimum
     pct = max(pct, settings.fanMinPct);
 
+    // Watt feed-forward boost — prištej boost% (0 če ni aktiven)
+    float wattNow;
+    portENTER_CRITICAL(&dataMux);
+    wattNow = sensorData.watt;
+    portEXIT_CRITICAL(&dataMux);
+
+    uint8_t extra = boostGetExtra(wattNow, temp);
+    if (extra > 0) {
+        uint8_t boosted = (uint8_t)constrain((int)pct + (int)extra, 0, 100);
+        if (isDndActive()) boosted = min(boosted, settings.dndMaxPct);
+        pct = boosted;
+    }
+
     setFanPct(pct);
-    LOG_INFO("FAN", "T=%.1f C -> %d%% DND=%s",
-             temp, pct, sensorData.dndActive ? "ON" : "off");
+    LOG_INFO("FAN", "T=%.1f C -> %d%% boost=%d%% DND=%s",
+             temp, pct, extra, sensorData.dndActive ? "ON" : "off");
 
     adaptUpdate(temp, pct);
 }

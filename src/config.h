@@ -62,6 +62,17 @@
 #define ADAPT_MIN_EQUILIBRIUM_MS    600000UL
 #define ADAPT_NVS_NAMESPACE         "fanadapt"
 
+// --- Watt Feed-Forward Boost ---
+#define BOOST_WATT_THRESHOLD_DEFAULT  10.0f
+#define BOOST_PCT_DEFAULT             20
+#define BOOST_PCT_MIN                 5
+#define BOOST_PCT_MAX                 40
+#define BOOST_ACTIVATE_MS             5000UL
+#define BOOST_EVAL_MS_DEFAULT         120000UL
+#define BOOST_TEMP_DEADBAND           0.3f
+#define BOOST_EMA_ALPHA               0.1f
+#define BOOST_NVS_NAMESPACE           "fanboost"
+
 // --- DND (nočni tihi način) ---
 #define FAN_DND_MAX_PCT     30      // Max % med DND
 #define FAN_DND_HOUR_FROM   22      // Od ure (0–23)
@@ -73,9 +84,16 @@
 // --- Časovni intervali (ms) ---
 #define SENSOR_READ_INTERVAL    10000UL    // Branje senzorjev: 10 s
 #define GRAPH_STORE_INTERVAL    60000UL    // Shranjevanje v graf buffer: 60 s
-#define DISPLAY_REFRESH_INTERVAL 60000UL  // ePaper osvežitev: 60 s
+// --- ePaper refresh strategija ---
+// Partial refresh (brez flasha) se sproži ob vsaki spremembi minute.
+// Periodični full refresh počisti ghosting ki se kopiči s partial osvežitvami.
+// Priporočeno: 30 (pogosto vidno ghosting) do 60 (normalno) minut.
+#define EPD_FULL_REFRESH_INTERVAL_MIN  60UL   // minute med full refreshi
 #define WIFI_CHECK_INTERVAL     600000UL  // WiFi watchdog: 10 min
 #define NTP_UPDATE_INTERVAL     1800000UL // NTP sinhronizacija: 30 min
+#define SENSOR_REINIT_INTERVAL  60000UL   // Retry inicializacije senzorjev: 60 s
+#define NTP_RETRY_INTERVAL      300000UL  // NTP retry če timeSynced=false: 5 min
+#define EPD_REINIT_INTERVAL     300000UL  // ePaper reinit retry če ERR_DISPLAY: 5 min
 
 // --- Časovna cona ---
 #define TZ_STRING   "CET-1CEST,M3.5.0,M10.5.0/3"
@@ -114,7 +132,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "0.9.7"
+#define FW_VERSION          "1.0.0"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -128,7 +146,7 @@ enum ErrorFlag : uint8_t {
 #define EPD_BUSY_TIMEOUT_MS    3000   // Max čakanje na BUSY LOW pri init [ms]
 
 // --- Open-Meteo vremenski API ---
-#define WEATHER_FETCH_INTERVAL  3600000UL  // 60 minut v ms
+#define WEATHER_FETCH_INTERVAL  1800000UL  // 30 minut v ms
 #define WEATHER_LAT             "46.05"    // Ljubljana — nastavi po potrebi
 #define WEATHER_LON             "14.51"    // Ljubljana — nastavi po potrebi
 #define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code&daily=sunrise,sunset&timezone=Europe%%2FLjubljana"

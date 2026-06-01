@@ -163,13 +163,17 @@ void showBootScreen() {
     LOG_INFO("EPD", "Boot screen OK");
 }
 
-void updateDisplay() {
+void updateDisplay(bool fullRefresh) {
     if (sensorData.err & ERR_DISPLAY) {
         LOG_WARN("EPD", "updateDisplay() preskocen — ERR_DISPLAY");
         return;
     }
 
-    display.setFullWindow();
+    if (fullRefresh) {
+        display.setFullWindow();
+    } else {
+        display.setPartialWindow(0, 0, EPD_WIDTH, EPD_HEIGHT);
+    }
     display.firstPage();
     do {
         display.fillScreen(GxEPD_WHITE);

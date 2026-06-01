@@ -7,6 +7,7 @@
 #include "config.h"
 #include "logging.h"
 #include "fan_adapt.h"
+#include "fan_boost.h"
 #include "graph_store.h"
 #include "fan.h"
 #include "monitor.h"
@@ -345,6 +346,9 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 .logbox table{width:100%}
 .logflt{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap}
 .logflt label{font-size:11px;color:#aaa;display:flex;align-items:center;gap:4px;cursor:pointer}
+/* Fan curve popup */
+#curveEditPopup input:focus{border-color:#00d4ff}
+#fanCurveSec{position:relative}
 </style></head><body>
 <header>
 <div><h1>&#9650; FANCONTROL</h1></div>
@@ -400,6 +404,36 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 
 <!-- ═══════════════════════════════════════════════════ TAB 1: VENTILATOR -->
 <div class="pane" id="p1">
+<!-- Krivulja ventilatorja — SVG graf -->
+<div class="sec" id="fanCurveSec" style="margin-bottom:12px">
+<h3>KRIVULJA VENTILATORJA</h3>
+<div style="position:relative;width:100%">
+  <svg id="fanCurveSvg" viewBox="0 0 520 220" style="width:100%;display:block;background:#0d0d0d;border-radius:6px;overflow:visible"></svg>
+</div>
+<!-- Legenda -->
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:8px;font-size:10px;color:#888;padding:0 4px">
+  <span><svg width="28" height="8" style="vertical-align:middle"><line x1="0" y1="4" x2="28" y2="4" stroke="#444" stroke-width="1.5" stroke-dasharray="4,3"/></svg> Default krivulja</span>
+  <span><svg width="28" height="8" style="vertical-align:middle"><line x1="0" y1="4" x2="28" y2="4" stroke="#00d4ff" stroke-width="2"/></svg> Aktivna krivulja</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="#00d4ff"/></svg> Prosta točka</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="#ff9500"/></svg> Zaklenjena točka</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="none" stroke="#555" stroke-width="1.5"/></svg> Nizek confidence</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="none" stroke="#ffd700" stroke-width="1.5"/></svg> Srednji confidence</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><circle cx="6" cy="6" r="5" fill="none" stroke="#30d158" stroke-width="1.5"/></svg> Visok confidence</span>
+  <span><svg width="6" height="14" style="vertical-align:middle"><line x1="3" y1="0" x2="3" y2="14" stroke="#e05252" stroke-width="2"/></svg> Trenutna temp</span>
+  <span><svg width="12" height="12" style="vertical-align:middle"><polygon points="6,0 12,10 0,10" fill="#ff9500"/></svg> Watt boost</span>
+</div>
+<!-- Inline edit popup (skrit) -->
+<div id="curveEditPopup" style="display:none;position:absolute;z-index:100;background:#1a1a1a;border:1px solid #00d4ff;border-radius:6px;padding:10px 14px;font-size:12px;box-shadow:0 4px 16px #000a">
+  <div style="color:#555;font-size:10px;margin-bottom:4px" id="editPopupLabel">Točka 0</div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="color:#aaa">Fan%:</span>
+    <input type="number" id="editPopupInput" min="0" max="100" style="width:60px;background:#0d0d0d;border:1px solid #333;color:#e0e0e0;padding:3px 6px;border-radius:4px;font-family:monospace">
+    <button onclick="editPopupApply()" style="padding:3px 10px;background:#00d4ff;color:#0d0d0d;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px">OK</button>
+    <button onclick="editPopupClose()" style="padding:3px 8px;background:#2a2a2a;color:#aaa;border:none;border-radius:4px;cursor:pointer;font-size:11px">&#x2715;</button>
+  </div>
+  <div style="font-size:10px;color:#ff9500;margin-top:4px" id="editPopupLockWarn"></div>
+</div>
+</div>
 <!-- Ročno upravljanje — PRVI blok -->
 <div class="sec"><h3>Ročno upravljanje</h3>
 <div class="fr" style="margin-bottom:14px">
@@ -441,6 +475,21 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
   Zaklenjene točke algoritem ne posodablja.
   <button class="btn bsm bto" onclick="adaptReset()" style="margin-left:12px">Reset učenja</button>
 </div>
+</div>
+<!-- Watt Boost -->
+<div class="sec"><h3>Watt Feed-Forward Boost</h3>
+<p style="font-size:11px;color:#555;margin-bottom:12px">
+  Ko poraba preseže prag, se fan% takoj poveča za boost vrednost.
+  Sistem oceni rezultat po nastavljenem času in se samodejno kalibrira.
+</p>
+<div class="fr"><label>Prag obremenitve [W]</label><input type="number" id="bWth" min="1" max="50" step="0.5" style="width:80px"></div>
+<div class="fr"><label>Boost vrednost [%]</label>
+  <input type="number" id="bPct" min="5" max="40" style="width:70px">
+  &nbsp;<span id="bPctConf" style="font-size:11px;color:#555"></span>
+</div>
+<div class="fr"><label>Ocenjevalni čas [min]</label><input type="number" id="bEval" min="1" max="10" style="width:70px"></div>
+<div class="fr"><label>Zakleni boost% (ne uči se)</label><input type="checkbox" id="bLock" style="accent-color:#ff9500"></div>
+<div class="fr"><label>Status</label><span id="bStatus" style="font-size:12px;color:#555">--</span></div>
 </div>
 <!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
@@ -548,7 +597,7 @@ function sw(i){
   atab=i;
   if(i===0&&!_uplot&&_rawData)initUplot(_rawData);
   if(i===0)loadHistory();
-  if(i===1&&!_fL)loadFan();
+  if(i===1){if(!_fL)loadFan();else drawFanCurveFromCache();}
   if(i===2&&!_cL)loadCal();
   if(i===2&&!_mL)loadMon();
   if(i===2)loadLed();
@@ -582,6 +631,13 @@ async function refreshData(){
     if(atab===0)loadHistory();
     // Sistemske info v Tab 3
     if(atab===3)buildSysInfo(d);
+    // Boost status
+    const bEl=document.getElementById('bStatus');
+    if(bEl){
+      if(d.boost_active){bEl.textContent='AKTIVEN +'+d.boost_pct+'%';bEl.style.color='#ff9500';}
+      else{bEl.textContent='neaktiven';bEl.style.color='#555';}
+    }
+    if(atab===1 && _curveData) drawFanCurveFromCache();
   }catch(e){}
 }
 setInterval(refreshData,5000);
@@ -661,6 +717,219 @@ async function refreshMonitor(){
 }
 setInterval(refreshMonitor,30000);refreshMonitor();
 
+// ══════════════════════════════════════════════════════════════════
+// FAN CURVE SVG GRAF
+// ══════════════════════════════════════════════════════════════════
+
+const CURVE_DEF_TEMP = [30, 38, 45, 52, 58, 65];
+const CURVE_DEF_PCT  = [15, 25, 45, 65, 85, 100];
+const CURVE_LABELS   = ['Mirovanje','Lahka obremenitev','Zmerna obremenitev',
+                        'Višja obremenitev','Visoka obremenitev','Maksimum'];
+
+const GC = {
+  left:48, right:16, top:16, bottom:36,
+  w: 520, h: 220,
+  tMin:25, tMax:70,
+  pMin:0,  pMax:100,
+};
+GC.plotW = GC.w - GC.left - GC.right;
+GC.plotH = GC.h - GC.top  - GC.bottom;
+
+function gcX(temp){ return GC.left + (temp - GC.tMin)/(GC.tMax - GC.tMin)*GC.plotW; }
+function gcY(pct) { return GC.top  + (1 - pct/GC.pMax)*GC.plotH; }
+
+function svgEl(tag, attrs){
+  const el=document.createElementNS('http://www.w3.org/2000/svg',tag);
+  for(const[k,v] of Object.entries(attrs)) el.setAttribute(k,v);
+  return el;
+}
+
+function confColor(conf, thresh){
+  if(conf >= thresh)   return '#30d158';
+  if(conf >= thresh/2) return '#ffd700';
+  return '#555';
+}
+
+let _curveData = null;
+let _editIdx   = -1;
+
+function drawFanCurve(s, liveTemp, boostActive, boostPct){
+  const svg = document.getElementById('fanCurveSvg');
+  if(!svg) return;
+  svg.innerHTML = '';
+
+  const thresh = s.adaptThresh || 20;
+
+  [0,25,50,75,100].forEach(p=>{
+    const y=gcY(p);
+    svg.appendChild(svgEl('line',{x1:GC.left,y1:y,x2:GC.left+GC.plotW,y2:y,
+      stroke:'#1e1e1e','stroke-width':'1'}));
+    svg.appendChild(svgEl('text',{x:GC.left-4,y:y+4,'text-anchor':'end',
+      fill:'#444','font-size':'9','font-family':'monospace'})).textContent=p+'%';
+  });
+  CURVE_DEF_TEMP.forEach(t=>{
+    const x=gcX(t);
+    svg.appendChild(svgEl('line',{x1:x,y1:GC.top,x2:x,y2:GC.top+GC.plotH,
+      stroke:'#1a1a1a','stroke-width':'1'}));
+    svg.appendChild(svgEl('text',{x:x,y:GC.top+GC.plotH+14,'text-anchor':'middle',
+      fill:'#444','font-size':'9','font-family':'monospace'})).textContent=t+'°';
+  });
+
+  svg.appendChild(svgEl('line',{x1:GC.left,y1:GC.top,x2:GC.left,y2:GC.top+GC.plotH,
+    stroke:'#333','stroke-width':'1'}));
+  svg.appendChild(svgEl('line',{x1:GC.left,y1:GC.top+GC.plotH,x2:GC.left+GC.plotW,y2:GC.top+GC.plotH,
+    stroke:'#333','stroke-width':'1'}));
+
+  let defPts = CURVE_DEF_TEMP.map((t,i)=>`${gcX(t)},${gcY(CURVE_DEF_PCT[i])}`).join(' ');
+  svg.appendChild(svgEl('polyline',{points:defPts,fill:'none',stroke:'#444',
+    'stroke-width':'1.5','stroke-dasharray':'5,4'}));
+
+  let actPts = CURVE_DEF_TEMP.map((t,i)=>`${gcX(t)},${gcY(s.curvePct[i])}`).join(' ');
+  const fillPts = `${gcX(CURVE_DEF_TEMP[0])},${gcY(0)} ` + actPts +
+                  ` ${gcX(CURVE_DEF_TEMP[5])},${gcY(0)}`;
+  svg.appendChild(svgEl('polygon',{points:fillPts,fill:'#00d4ff0d',stroke:'none'}));
+  svg.appendChild(svgEl('polyline',{points:actPts,fill:'none',stroke:'#00d4ff',
+    'stroke-width':'2'}));
+
+  CURVE_DEF_TEMP.forEach((t,i)=>{
+    const x = gcX(t);
+    const y = gcY(s.curvePct[i]);
+    const locked = s.curveLocked && s.curveLocked[i];
+    const conf   = s.curveConfidence ? s.curveConfidence[i] : 0;
+    const cColor = confColor(conf, thresh);
+
+    const hit = svgEl('circle',{cx:x,cy:y,r:'14',fill:'transparent',
+      style:'cursor:pointer'});
+    hit.addEventListener('click', e=>{ e.stopPropagation(); editPopupOpen(i,x,y,s); });
+    svg.appendChild(hit);
+
+    svg.appendChild(svgEl('circle',{cx:x,cy:y,r:'7',fill:'none',
+      stroke:cColor,'stroke-width':'2'}));
+
+    svg.appendChild(svgEl('circle',{cx:x,cy:y,r:'4.5',
+      fill: locked ? '#ff9500' : '#00d4ff'}));
+
+    if(locked){
+      const lk=svgEl('text',{x:x+8,y:y-6,fill:'#ff9500','font-size':'9',
+        'font-family':'monospace'});
+      lk.textContent='🔒';
+      svg.appendChild(lk);
+    }
+
+    const vt=svgEl('text',{x:x,y:y-11,'text-anchor':'middle',fill:'#00d4ff',
+      'font-size':'10','font-family':'monospace','font-weight':'bold'});
+    vt.textContent=s.curvePct[i]+'%';
+    svg.appendChild(vt);
+  });
+
+  if(liveTemp && liveTemp > GC.tMin && liveTemp < GC.tMax){
+    const tx = gcX(liveTemp);
+    svg.appendChild(svgEl('line',{x1:tx,y1:GC.top,x2:tx,y2:GC.top+GC.plotH,
+      stroke:'#e05252','stroke-width':'1.5','stroke-dasharray':'3,2'}));
+    let fPct = s.curvePct[0];
+    for(let i=0;i<CURVE_DEF_TEMP.length-1;i++){
+      if(liveTemp>=CURVE_DEF_TEMP[i]&&liveTemp<CURVE_DEF_TEMP[i+1]){
+        const r=(liveTemp-CURVE_DEF_TEMP[i])/(CURVE_DEF_TEMP[i+1]-CURVE_DEF_TEMP[i]);
+        fPct=s.curvePct[i]+r*(s.curvePct[i+1]-s.curvePct[i]);
+      }
+    }
+    const ty = gcY(fPct);
+    const tb=svgEl('rect',{x:tx-18,y:GC.top+GC.plotH+3,width:36,height:12,
+      fill:'#e05252',rx:'3'});
+    svg.appendChild(tb);
+    const tt=svgEl('text',{x:tx,y:GC.top+GC.plotH+12,'text-anchor':'middle',
+      fill:'#fff','font-size':'9','font-family':'monospace','font-weight':'bold'});
+    tt.textContent=parseFloat(liveTemp).toFixed(1)+'°';
+    svg.appendChild(tt);
+
+    if(boostActive && boostPct>0){
+      const byBase = gcY(fPct);
+      const byTop  = gcY(Math.min(100, fPct + boostPct));
+      svg.appendChild(svgEl('line',{x1:tx,y1:byBase,x2:tx,y2:byTop,
+        stroke:'#ff9500','stroke-width':'2.5'}));
+      svg.appendChild(svgEl('polygon',{
+        points:`${tx},${byTop-1} ${tx-5},${byTop+7} ${tx+5},${byTop+7}`,
+        fill:'#ff9500'}));
+      const bt=svgEl('text',{x:tx+8,y:byTop+4,fill:'#ff9500',
+        'font-size':'9','font-family':'monospace','font-weight':'bold'});
+      bt.textContent='+'+boostPct+'%';
+      svg.appendChild(bt);
+    }
+  }
+}
+
+function editPopupOpen(idx, svgX, svgY, s){
+  _editIdx = idx;
+  const popup  = document.getElementById('curveEditPopup');
+  const sec    = document.getElementById('fanCurveSec');
+  const svg    = document.getElementById('fanCurveSvg');
+  const locked = s.curveLocked && s.curveLocked[idx];
+
+  document.getElementById('editPopupLabel').textContent =
+    'Točka '+idx+' — '+CURVE_LABELS[idx]+' ('+CURVE_DEF_TEMP[idx]+'°C)';
+  document.getElementById('editPopupInput').value = s.curvePct[idx];
+  document.getElementById('editPopupLockWarn').textContent =
+    locked ? '⚠ Točka zaklenjena — algoritem ne bo posodabljal' : '';
+
+  const svgRect = svg.getBoundingClientRect();
+  const secRect = sec.getBoundingClientRect();
+  const scaleX  = svgRect.width  / 520;
+  const scaleY  = svgRect.height / 220;
+  let px = svgRect.left - secRect.left + svgX * scaleX;
+  let py = svgRect.top  - secRect.top  + svgY * scaleY - 60;
+
+  px = Math.max(4, Math.min(px, secRect.width - 180));
+  py = Math.max(4, py);
+
+  popup.style.left = px+'px';
+  popup.style.top  = py+'px';
+  popup.style.display = 'block';
+
+  setTimeout(()=>document.getElementById('editPopupInput').select(), 50);
+}
+
+function editPopupClose(){
+  document.getElementById('curveEditPopup').style.display='none';
+  _editIdx = -1;
+}
+
+function editPopupApply(){
+  if(_editIdx < 0) return;
+  const val = parseInt(document.getElementById('editPopupInput').value);
+  if(isNaN(val)||val<0||val>100){
+    document.getElementById('editPopupInput').style.borderColor='#ff3b30';
+    return;
+  }
+  const inp = document.getElementById('cp'+_editIdx);
+  if(inp) inp.value = val;
+  const savedIdx = _editIdx;
+  editPopupClose();
+  saveFan().then(()=>{
+    if(_curveData){ _curveData.curvePct[savedIdx]=val; drawFanCurveFromCache(); }
+  });
+}
+
+document.addEventListener('keydown', e=>{
+  if(document.getElementById('curveEditPopup').style.display==='block'){
+    if(e.key==='Enter')  editPopupApply();
+    if(e.key==='Escape') editPopupClose();
+  }
+});
+document.addEventListener('click', e=>{
+  const popup=document.getElementById('curveEditPopup');
+  if(popup.style.display==='block' && !popup.contains(e.target) &&
+     !e.target.closest('#fanCurveSvg')) editPopupClose();
+});
+
+function drawFanCurveFromCache(){
+  if(!_curveData) return;
+  const liveTemp   = parseFloat(document.getElementById('ct').textContent) || null;
+  const bEl        = document.getElementById('bStatus');
+  const boostActive= bEl && bEl.textContent.includes('AKTIVEN');
+  const boostPct   = _curveData.boostPct || 0;
+  drawFanCurve(_curveData, liveTemp, boostActive, boostPct);
+}
+
 // ── Fan nastavitve ─────────────────────────────────────────────────
 async function loadFan(){
   try{
@@ -684,6 +953,15 @@ async function loadFan(){
     document.getElementById('dndF').value=s.dndFrom;
     document.getElementById('dndT').value=s.dndTo;
     try{const m=await(await fetch('/api/fan/manual')).json();document.getElementById('manToggle').checked=m.manual;document.getElementById('manPct').value=m.pct;document.getElementById('manPctVal').textContent=m.pct+'%';updateManUI(m.manual,m.pct);}catch(e){}
+    if(s.boostWattThreshold!==undefined){
+      document.getElementById('bWth').value=s.boostWattThreshold;
+      document.getElementById('bPct').value=s.boostPct;
+      document.getElementById('bEval').value=s.boostEvalMin||2;
+      document.getElementById('bLock').checked=s.boostLocked||false;
+      document.getElementById('bPctConf').textContent=s.boostLocked?'(zaklenjeno)':'(samo-kalibrirano)';
+    }
+    _curveData = s;
+    drawFanCurveFromCache();
     _fL=true;
   }catch(e){}
 }
@@ -691,9 +969,10 @@ async function saveFan(){
   const ct=[0,1,2,3,4,5].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
   const cp=[0,1,2,3,4,5].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
   const cl=[0,1,2,3,4,5].map(i=>document.getElementById('cl'+i).checked);
-  const b={curveTemp:ct,curvePct:cp,curveLocked:cl,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7};
+  const b={curveTemp:ct,curvePct:cp,curveLocked:cl,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7,boostWattThreshold:parseFloat(document.getElementById('bWth').value)||10,boostPct:parseInt(document.getElementById('bPct').value)||20,boostLocked:document.getElementById('bLock').checked,boostEvalMin:parseInt(document.getElementById('bEval').value)||2};
   const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const m=document.getElementById('msgF');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+  loadFan();
 }
 async function adaptReset(){
   if(!confirm('Ponastavi vse naučene vrednosti na default? Zaklepi ostanejo.'))return;
@@ -963,6 +1242,9 @@ void initWebserver() {
         doc["chip_rev"]      = ESP.getChipRevision();
         doc["mac"]           = WiFi.macAddress();
         doc["led_enabled"]   = settings.ledEnabled;
+        doc["boost_active"]  = boostIsActive();
+        doc["boost_pct"]     = boostGetPct();
+        doc["boost_watt_thr"] = settings.boostWattThreshold;
 
         String resp;
         serializeJson(doc, resp);
@@ -1107,7 +1389,11 @@ void initWebserver() {
         doc["dndEnabled"]   = settings.dndEnabled;
         doc["dndFrom"]      = settings.dndFrom;
         doc["dndTo"]        = settings.dndTo;
-        doc["adaptThresh"]  = ADAPT_CONFIDENCE_THRESH;
+        doc["adaptThresh"]        = ADAPT_CONFIDENCE_THRESH;
+        doc["boostWattThreshold"] = settings.boostWattThreshold;
+        doc["boostPct"]           = settings.boostPct;
+        doc["boostLocked"]        = settings.boostLocked;
+        doc["boostEvalMin"]       = settings.boostEvalMs / 60000UL;
         String resp;
         serializeJson(doc, resp);
         request->send(200, "application/json", resp);
@@ -1191,6 +1477,21 @@ void initWebserver() {
             if (doc.containsKey("dndTo")) {
                 uint8_t v = doc["dndTo"];
                 if (v <= 23) settings.dndTo = v;
+            }
+            if (doc.containsKey("boostWattThreshold")) {
+                float v = doc["boostWattThreshold"];
+                if (v >= 1.0f && v <= 50.0f) settings.boostWattThreshold = v;
+            }
+            if (doc.containsKey("boostPct")) {
+                uint8_t v = doc["boostPct"];
+                if (v >= BOOST_PCT_MIN && v <= BOOST_PCT_MAX) settings.boostPct = v;
+            }
+            if (doc.containsKey("boostLocked")) {
+                settings.boostLocked = doc["boostLocked"];
+            }
+            if (doc.containsKey("boostEvalMin")) {
+                uint32_t v = (uint32_t)(int)doc["boostEvalMin"];
+                if (v >= 1 && v <= 10) settings.boostEvalMs = v * 60000UL;
             }
 
             saveSettings();
@@ -1454,8 +1755,14 @@ void initWebserver() {
 void handleWebserver() {
     // ESP32 ESPmDNS teče v ozadju — update() ni potreben
 
-    // NTP re-sync vsakih 30 min
+    // NTP re-sync vsakih 30 min (normalno delovanje)
     if (timeSynced && millis() - lastNtpSyncMs >= NTP_UPDATE_INTERVAL) {
+        syncNTP();
+    }
+    // NTP retry vsakih 5 min če ob zagonu ni uspelo
+    if (!timeSynced && WiFi.status() == WL_CONNECTED &&
+        millis() - lastNtpSyncMs >= NTP_RETRY_INTERVAL) {
+        LOG_INFO("NTP", "Retry — ob zagonu ni uspelo");
         syncNTP();
     }
 
@@ -1465,7 +1772,15 @@ void handleWebserver() {
         if (WiFi.status() != WL_CONNECTED) {
             LOG_WARN("WIFI", "Reconnecting...");
             connectWiFi();
-            if (WiFi.status() == WL_CONNECTED && !timeSynced) syncNTP();
+            if (WiFi.status() == WL_CONNECTED) {
+                MDNS.end();
+                if (MDNS.begin(MDNS_HOSTNAME)) {
+                    LOG_INFO("MDNS", "mDNS restartan po reconnectu: http://%s.local", MDNS_HOSTNAME);
+                } else {
+                    LOG_WARN("MDNS", "mDNS restart neuspesen");
+                }
+                if (!timeSynced) syncNTP();
+            }
         }
     }
 }

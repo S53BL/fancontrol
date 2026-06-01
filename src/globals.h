@@ -72,6 +72,24 @@ struct Settings {
     } monitorPorts[MONITOR_MAX_PORTS];
 
     bool    ledEnabled;         // RGB LED omogočena (false = LED nikoli ne sveti)
+
+    // Watt Boost
+    float    boostWattThreshold;
+    uint8_t  boostPct;
+    bool     boostLocked;
+    uint32_t boostEvalMs;
+};
+
+// --- Watt Boost stanje (runtime, ne v NVS) ---
+struct WattBoost {
+    float    prevWatt;
+    uint32_t aboveThreshSinceMs;
+    bool     boostActive;
+    uint32_t boostStartMs;
+    float    tempAtBoostStart;
+    bool     evalDone;
+    uint32_t fadeStartMs;
+    uint8_t  boostPctAtFadeStart;
 };
 
 // --- Adaptivni opazovalec (runtime, ne shranjevati v NVS) ---
@@ -89,6 +107,7 @@ struct AdaptObserver {
 extern SensorData    sensorData;
 extern Settings      settings;
 extern AdaptObserver adaptObserver;
+extern WattBoost     wattBoost;
 extern Timezone   myTZ;
 extern bool       timeSynced;
 extern bool       newSensorData;

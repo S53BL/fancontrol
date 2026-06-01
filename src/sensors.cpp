@@ -137,6 +137,42 @@ void readSensors() {
     portEXIT_CRITICAL(&dataMux);
 }
 
+bool sensorSht30Ok()  { return _sht30Ok; }
+bool sensorIna219Ok() { return _ina219Ok; }
+
+// Periodični retry za senzorje ki ob zagonu niso uspeli
+void retrySensors() {
+    if (!_sht30Ok) {
+        LOG_INFO("SENS", "SHT30 retry inicializacije...");
+        if (!i2cDevicePresent(ADDR_SHT30)) {
+            LOG_WARN("SENS", "SHT30 retry: ni na I2C 0x%02X", ADDR_SHT30);
+        } else if (!sht30.begin(ADDR_SHT30)) {
+            LOG_WARN("SENS", "SHT30 retry: begin() napaka");
+        } else {
+            _sht30Ok = true;
+            portENTER_CRITICAL(&dataMux);
+            sensorData.err &= ~ERR_SHT30;
+            portEXIT_CRITICAL(&dataMux);
+            LOG_INFO("SENS", "SHT30 retry: OK");
+        }
+    }
+
+    if (!_ina219Ok) {
+        LOG_INFO("SENS", "INA219 retry inicializacije...");
+        if (!i2cDevicePresent(ADDR_INA219)) {
+            LOG_WARN("SENS", "INA219 retry: ni na I2C 0x%02X", ADDR_INA219);
+        } else if (!ina219.begin()) {
+            LOG_WARN("SENS", "INA219 retry: begin() napaka");
+        } else {
+            _ina219Ok = true;
+            portENTER_CRITICAL(&dataMux);
+            sensorData.err &= ~ERR_INA219;
+            portEXIT_CRITICAL(&dataMux);
+            LOG_INFO("SENS", "INA219 retry: OK");
+        }
+    }
+}
+
 // Peak watt avtokalibracija — kliče se po vsakem INA219 branju
 void updatePeakWatt() {
     float current = sensorData.watt;

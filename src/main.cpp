@@ -14,6 +14,7 @@
 #include "graph_store.h"
 #include "monitor.h"
 #include "fan_adapt.h"
+#include "fan_boost.h"
 #include <WiFi.h>
 #include <ezTime.h>
 #include "led.h"
@@ -55,6 +56,8 @@ void setup() {
     LOG_INFO("BOOT", "Fan PWM init OK");
     adaptInit();
     LOG_INFO("BOOT", "Adapt fan init OK");
+    boostInit();
+    LOG_INFO("BOOT", "Boost init OK");
 
     // 6b. Monitor init
     monitorInit();
@@ -127,7 +130,7 @@ void setup() {
                      weatherData.sunrise, weatherData.sunset, utcOff);
         }
 
-        updateDisplay();
+        updateDisplay(true);  // prvi prikaz vedno full refresh
         lastDisplayRefreshMs = millis();
         LOG_INFO("BOOT", "Prvi display refresh OK");
     }
@@ -136,6 +139,10 @@ void setup() {
 void loop() {
     unsigned long now = millis();
     static uint8_t lastSunDay = 0;
+    static unsigned long lastSensorRetryMs  = 0;
+    static unsigned long lastEpdReinitMs    = 0;
+    static uint8_t lastDisplayMinute = 255;  // 255 = forsira osvežitev ob zagonu
+    static uint32_t lastFullRefreshMin = 0;  // minuta zadnjega full refresha (uptime v minutah)
 
     // Branje senzorjev
     if (now - lastSensorReadMs >= SENSOR_READ_INTERVAL) {
@@ -151,6 +158,33 @@ void loop() {
             ledOrange();
         }
         newSensorData = true;
+    }
+
+    // Sensor retry — reinicializacija senzorjev ki ob zagonu niso uspeli
+    if ((!sensorSht30Ok() || !sensorIna219Ok()) &&
+        (now - lastSensorRetryMs >= SENSOR_REINIT_INTERVAL)) {
+        lastSensorRetryMs = now;
+        retrySensors();
+    }
+
+    // ePaper reinit retry — reinicializacija zaslona če ob zagonu ni uspelo
+    if ((sensorData.err & ERR_DISPLAY) &&
+        (now - lastEpdReinitMs >= EPD_REINIT_INTERVAL)) {
+        lastEpdReinitMs = now;
+        LOG_INFO("EPD", "Reinit retry...");
+        if (initDisplay()) {
+            portENTER_CRITICAL(&dataMux);
+            sensorData.err &= ~ERR_DISPLAY;
+            portEXIT_CRITICAL(&dataMux);
+            showBootScreen();
+            delay(3000);
+            updateDisplay(true);
+            lastDisplayRefreshMs = millis();
+            lastFullRefreshMin   = millis() / 60000UL;
+            LOG_INFO("EPD", "Reinit uspel — zaslon aktiven");
+        } else {
+            LOG_WARN("EPD", "Reinit neuspesen — naslednji poskus cez 5 min");
+        }
     }
 
     // Shranjevanje v graf buffer
@@ -189,10 +223,29 @@ void loop() {
         }
     }
 
-    // ePaper osvežitev
-    if (now - lastDisplayRefreshMs >= DISPLAY_REFRESH_INTERVAL) {
-        lastDisplayRefreshMs = now;
-        updateDisplay();
+    // ePaper osvežitev — ob spremembi minute
+    if (timeSynced) {
+        uint8_t currentMinute = (uint8_t)myTZ.minute();
+        if (currentMinute != lastDisplayMinute) {
+            lastDisplayMinute = currentMinute;
+
+            // Preveri ali je čas za periodični full refresh (čiščenje ghostinga)
+            uint32_t uptimeMin = millis() / 60000UL;
+            bool doFullRefresh = (uptimeMin - lastFullRefreshMin) >= EPD_FULL_REFRESH_INTERVAL_MIN;
+            if (doFullRefresh) {
+                lastFullRefreshMin = uptimeMin;
+            }
+
+            updateDisplay(doFullRefresh);
+            lastDisplayRefreshMs = millis();  // ohranimo za kompatibilnost / logging
+            LOG_INFO("EPD", "Refresh: %s, min=%d", doFullRefresh ? "FULL" : "partial", currentMinute);
+        }
+    } else {
+        // NTP še ni sinhroniziran — fallback na interval 60s
+        if (now - lastDisplayRefreshMs >= 60000UL) {
+            lastDisplayRefreshMs = now;
+            updateDisplay(false);
+        }
     }
 
     // Weather fetch — vsakih 30 minut (Core 0 WiFi stack)

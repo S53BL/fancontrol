@@ -6,6 +6,7 @@
 SensorData   sensorData;
 Settings     settings;
 AdaptObserver adaptObserver = {};
+WattBoost     wattBoost     = {};
 
 // --- ezTime: timezone objekt ---
 Timezone myTZ;
@@ -104,6 +105,11 @@ static void initDefaults() {
     }
 
     settings.ledEnabled = true;
+
+    settings.boostWattThreshold = BOOST_WATT_THRESHOLD_DEFAULT;
+    settings.boostPct           = BOOST_PCT_DEFAULT;
+    settings.boostLocked        = false;
+    settings.boostEvalMs        = BOOST_EVAL_MS_DEFAULT;
 
     Serial.println("[Settings] Privzete vrednosti nastavljene");
 }
