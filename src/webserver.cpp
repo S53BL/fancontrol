@@ -103,20 +103,20 @@ void fetchWeather() {
     const char* srRaw = doc["daily"]["sunrise"][0] | nullptr;
     const char* ssRaw = doc["daily"]["sunset"][0]  | nullptr;
 
+    // Sunrise/sunset iz API — samo če je odgovor veljaven, sicer obdrži lokalni izračun
     if (srRaw && strlen(srRaw) >= 16) {
-        // Format: "2026-06-01T05:23" — HH:MM je na poziciji 11
         strncpy(weatherData.sunrise, srRaw + 11, 5);
         weatherData.sunrise[5] = '\0';
-    } else {
-        strncpy(weatherData.sunrise, "--:--", 6);
+        LOG_INFO("WX", "API sunrise: %s", weatherData.sunrise);
     }
+    // else: ne prepiši z "--:--" — lokalni izračun iz calcSunTimes() ostane
 
     if (ssRaw && strlen(ssRaw) >= 16) {
         strncpy(weatherData.sunset, ssRaw + 11, 5);
         weatherData.sunset[5] = '\0';
-    } else {
-        strncpy(weatherData.sunset, "--:--", 6);
+        LOG_INFO("WX", "API sunset: %s", weatherData.sunset);
     }
+    // else: ne prepiši z "--:--" — lokalni izračun iz calcSunTimes() ostane
 
     // isNight — izračun iz sunrise/sunset (HH:MM formata)
     weatherData.isNight = false;

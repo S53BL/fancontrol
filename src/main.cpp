@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <ezTime.h>
 #include "led.h"
+#include "suntime.h"
 
 void setup() {
     // 1. Serial — mora biti prvi, da vidimo LED diagnostiko pri bootanju
@@ -111,6 +112,18 @@ void setup() {
     if (!(sensorData.err & ERR_DISPLAY)) {
         LOG_INFO("BOOT", "Cakam 7s pred prvim display refresh...");
         delay(7000);
+
+        // Sunrise/sunset — lokalni izračun (pred prvim prikazom)
+        if (timeSynced) {
+            int utcOff = getCETOffset(myTZ.day(), myTZ.month(), myTZ.year());
+            calcSunTimes(myTZ.day(), myTZ.month(), myTZ.year(),
+                         atof(WEATHER_LAT), atof(WEATHER_LON),
+                         utcOff,
+                         weatherData.sunrise, weatherData.sunset);
+            LOG_INFO("SUN", "Izracun: vzh=%s  zah=%s  UTC+%d",
+                     weatherData.sunrise, weatherData.sunset, utcOff);
+        }
+
         updateDisplay();
         lastDisplayRefreshMs = millis();
         LOG_INFO("BOOT", "Prvi display refresh OK");
@@ -119,6 +132,7 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+    static uint8_t lastSunDay = 0;
 
     // Branje senzorjev
     if (now - lastSensorReadMs >= SENSOR_READ_INTERVAL) {
@@ -155,6 +169,21 @@ void loop() {
         // Peak temp tracker
         if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
             peakTemp = sensorData.temp;
+    }
+
+    // Dnevni recalc sunrise/sunset (enkrat na dan ob spremembi datuma)
+    if (timeSynced) {
+        uint8_t todayDay = (uint8_t)myTZ.day();
+        if (todayDay != lastSunDay) {
+            lastSunDay = todayDay;
+            int utcOff = getCETOffset(myTZ.day(), myTZ.month(), myTZ.year());
+            calcSunTimes(myTZ.day(), myTZ.month(), myTZ.year(),
+                         atof(WEATHER_LAT), atof(WEATHER_LON),
+                         utcOff,
+                         weatherData.sunrise, weatherData.sunset);
+            LOG_INFO("SUN", "Dnevni recalc: vzh=%s  zah=%s  UTC+%d",
+                     weatherData.sunrise, weatherData.sunset, utcOff);
+        }
     }
 
     // ePaper osvežitev
