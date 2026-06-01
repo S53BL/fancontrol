@@ -8,6 +8,8 @@
 #include <U8g2_for_Adafruit_GFX.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include "wifi_config.h"
+#include <qrcode.h>
 
 // Font aliasi — tehno stil (_mf: Extended Latin, podpora za °C in Č)
 #define FONT_LABEL  u8g2_font_profont10_mf
@@ -27,48 +29,50 @@ static int16_t centerX(const char* str, uint8_t /*fontSize*/) {
     return (EPD_WIDTH - (int16_t)u8g2Fonts.getUTF8Width(str)) / 2;
 }
 
-// Vrne slovensko kratico dneva
+// Vrne slovensko ime dneva — cela beseda brez šumnikov
 static const char* getDaySLO() {
+    if (!timeSynced) return "---";
     String d = myTZ.dateTime("D");
-    if (d == "Mon") return "PON";
-    if (d == "Tue") return "TOR";
-    if (d == "Wed") return "SRE";
-    if (d == "Thu") return "\xC4\x8C" "ET";  // Č + ET (UTF-8, potrebuje _mf font)
-    if (d == "Fri") return "PET";
-    if (d == "Sat") return "SOB";
-    if (d == "Sun") return "NED";
+    if (d == "Mon") return "Ponedeljek";
+    if (d == "Tue") return "Torek";
+    if (d == "Wed") return "Sreda";
+    if (d == "Thu") return "Cetrtek";
+    if (d == "Fri") return "Petek";
+    if (d == "Sat") return "Sobota";
+    if (d == "Sun") return "Nedelja";
     return "---";
 }
 
 bool initDisplay() {
-    // 3a: GPIO pred SPI — preprečimo nedefiniran pin status (GxEPD2 crash)
+    LOG_INFO("EPD", "initDisplay() — start");
+
+    // GPIO pred SPI — preprečimo nedefiniran pin status
     pinMode(PIN_EPD_DC,   OUTPUT);
     pinMode(PIN_EPD_RST,  OUTPUT);
     pinMode(PIN_EPD_CS,   OUTPUT);
     pinMode(PIN_EPD_BUSY, INPUT_PULLUP);
 
+    LOG_INFO("EPD", "GPIO OK, BUSY=%d", digitalRead(PIN_EPD_BUSY));
+
     SPI.begin(PIN_EPD_CLK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
     delay(10);
 
-    // 3b: BUSY timeout — floating pin ali zaslon ni priključen
-    unsigned long t0 = millis();
-    while (digitalRead(PIN_EPD_BUSY) == HIGH) {
-        if (millis() - t0 >= EPD_BUSY_TIMEOUT_MS) {
-            sensorData.err |= ERR_DISPLAY;
-            LOG_WARN("EPD", "BUSY stuck HIGH po %lums — ePaper ni priključen", EPD_BUSY_TIMEOUT_MS);
-            return false;
-        }
-        delay(10);
-    }
+    LOG_INFO("EPD", "SPI OK — kličem display.init()");
 
-    // 3c: Init samo če BUSY ni stuck
-    display.init(115200, true, 2, false);
+    // Reset pulse 50ms — kot demo EpaperModuleTest_Arduino_ESP32S3.ino
+    // BUSY pre-check odstranjen — GxEPD2 opravi init sekvenco sam
+    display.init(115200, true, 50, false);
+
+    LOG_INFO("EPD", "display.init() OK, BUSY=%d", digitalRead(PIN_EPD_BUSY));
+
     display.setRotation(0);
     display.setFullWindow();
     display.firstPage();
     do {
         display.fillScreen(GxEPD_WHITE);
     } while (display.nextPage());
+
+    LOG_INFO("EPD", "clearScreen OK");
 
     u8g2Fonts.begin(display);
     u8g2Fonts.setFontMode(1);
@@ -78,6 +82,85 @@ bool initDisplay() {
 
     LOG_INFO("EPD", "ePaper init OK");
     return true;
+}
+
+void showBootScreen() {
+    if (sensorData.err & ERR_DISPLAY) return;
+
+    display.setFullWindow();
+    display.firstPage();
+    do {
+        display.fillScreen(GxEPD_WHITE);
+
+        // ── Naziv in verzija (zgoraj) ─────────────────────────────
+        u8g2Fonts.setFont(u8g2_font_profont12_mf);
+        u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+        u8g2Fonts.setCursor(4, 14);
+        u8g2Fonts.print("fancontrol");
+        u8g2Fonts.setCursor(4, 28);
+        u8g2Fonts.print(FW_VERSION);
+
+        // ── Loading... (večji font) ───────────────────────────────
+        u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+        u8g2Fonts.setCursor(4, 54);
+        u8g2Fonts.print("Loading...");
+
+        // ── Ločilna črta ─────────────────────────────────────────
+        display.drawFastHLine(4, 62, 120, GxEPD_BLACK);
+
+        // ── Mrežni podatki ────────────────────────────────────────
+        u8g2Fonts.setFont(u8g2_font_profont10_mf);
+
+        // ESP32 IP
+        u8g2Fonts.setCursor(4, 76);
+        u8g2Fonts.print(WIFI_STATIC_IP);
+
+        // mDNS
+        u8g2Fonts.setCursor(4, 90);
+        u8g2Fonts.print(MDNS_HOSTNAME ".local");
+
+        // Monitor IP (iz settings — nastavljiv v web vmesniku)
+        u8g2Fonts.setCursor(4, 104);
+        u8g2Fonts.print("PC: ");
+        u8g2Fonts.print(settings.monitorIp);
+
+        // ── QR koda — polna širina, spodaj ───────────────────────
+        // QR vsebina: http://<IP>
+        char qrStr[32];
+        snprintf(qrStr, sizeof(qrStr), "http://%s", WIFI_STATIC_IP);
+
+        QRCode qrcode;
+        // Verzija 3 = 29x29 modulov — zadostuje za http://192.168.2.169
+        uint8_t qrData[qrcode_getBufferSize(3)];
+        qrcode_initText(&qrcode, qrData, 3, ECC_LOW, qrStr);
+
+        // Izračun scale in pozicije — polna širina 128px
+        // 29 modulov + 4 moduli quiet zone (vsaka stran) = 37 modulov
+        // scale = floor(128 / 37) = 3 → 37*3 = 111px, centriramo
+        const uint8_t qrScale    = 3;
+        const uint8_t quietZone  = 4;
+        const uint8_t qrModules  = qrcode.size + quietZone * 2;
+        const uint8_t qrPx       = qrModules * qrScale;
+        const int16_t qrX        = (EPD_WIDTH - qrPx) / 2;
+        const int16_t qrY        = EPD_HEIGHT - qrPx - 2;  // 2px od spodnjega roba
+
+        // Bela podlaga za QR (quiet zone)
+        display.fillRect(qrX, qrY, qrPx, qrPx, GxEPD_WHITE);
+
+        // Izriši module
+        for (uint8_t row = 0; row < qrcode.size; row++) {
+            for (uint8_t col = 0; col < qrcode.size; col++) {
+                if (qrcode_getModule(&qrcode, col, row)) {
+                    int16_t px = qrX + (quietZone + col) * qrScale;
+                    int16_t py = qrY + (quietZone + row) * qrScale;
+                    display.fillRect(px, py, qrScale, qrScale, GxEPD_BLACK);
+                }
+            }
+        }
+
+    } while (display.nextPage());
+
+    LOG_INFO("EPD", "Boot screen OK");
 }
 
 void updateDisplay() {
@@ -96,70 +179,96 @@ void updateDisplay() {
         display.drawFastHLine(4, 211, 120, GxEPD_BLACK);
 
         // ══════════════════════════════════════════════════════════════
-        // CONA 1 — Čas, DND, zunanja temperatura/vlaga, wx ikona
+        // CONA 1 — Čas, datum, sunrise/sunset, zunanja temp/vlaga, wx ikona
         // y: 0–116
         // ══════════════════════════════════════════════════════════════
 
-        // --- Ura ---
+        // --- Ura (levo zgoraj, velik font) ---
         if (timeSynced) {
             String timeStr = myTZ.dateTime("H:i");
             u8g2Fonts.setFont(u8g2_font_logisoso24_tf);
             u8g2Fonts.setCursor(4, 34);
             u8g2Fonts.print(timeStr);
-
-            // Dan (kratko)
-            const char* day = getDaySLO();
-            u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4, 50);
-            u8g2Fonts.print(day);
         } else {
             u8g2Fonts.setFont(u8g2_font_logisoso24_tf);
             u8g2Fonts.setCursor(4, 34);
             u8g2Fonts.print("--:--");
         }
 
-        // --- DND luna ikona (desno zgoraj) ---
-        if (sensorData.dndActive) {
-            display.fillCircle(113, 14, 9, GxEPD_BLACK);
-            display.fillCircle(117, 11, 8, GxEPD_WHITE);
+        // --- Sunrise / Sunset desno od ure v dveh vrsticah ---
+        // Pozicija: x=70 (desna polovica), vrstici y=20 in y=34
+        {
             u8g2Fonts.setFont(u8g2_font_profont10_mf);
-            u8g2Fonts.setCursor(105, 30);
-            u8g2Fonts.print("DND");
+            char buf[12];
+
+            // Vrstica 1: vzh HH:MM
+            snprintf(buf, sizeof(buf), "vzh %s", weatherData.sunrise);
+            u8g2Fonts.setCursor(70, 22);
+            u8g2Fonts.print(buf);
+
+            // Vrstica 2: zah HH:MM
+            snprintf(buf, sizeof(buf), "zah %s", weatherData.sunset);
+            u8g2Fonts.setCursor(70, 34);
+            u8g2Fonts.print(buf);
         }
 
-        // --- Zunanja temp + vlaga ---
+        // --- Datum: cela beseda + datum (levo, pod uro) ---
+        if (timeSynced) {
+            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            char dateBuf[32];
+            // Format: "Ponedeljek 1.6.2026"
+            snprintf(dateBuf, sizeof(dateBuf), "%s %d.%d.%d",
+                     getDaySLO(),
+                     myTZ.day(), myTZ.month(), myTZ.year());
+            u8g2Fonts.setCursor(4, 46);
+            u8g2Fonts.print(dateBuf);
+        }
+
+        // --- DND luna ikona (desno zgoraj, samo če aktiven) ---
+        if (sensorData.dndActive) {
+            display.fillCircle(113, 8, 7, GxEPD_BLACK);
+            display.fillCircle(116, 5, 6, GxEPD_WHITE);
+        }
+
+        // --- Ločilna črta med uro/datumom in zunanjo cono ---
+        display.drawFastHLine(4, 50, 120, GxEPD_BLACK);
+
+        // --- Zunanja temp + vlaga (levo, pod ločilno črto) ---
         {
             char buf[12];
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
-            u8g2Fonts.setCursor(4, 63);
-            u8g2Fonts.print("ZUNAJ");
-
             if (!weatherData.valid) {
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 84);
+                u8g2Fonts.setCursor(4, 72);
                 u8g2Fonts.print("--.-");
-                u8g2Fonts.setCursor(4, 104);
+                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setCursor(4, 84);
                 u8g2Fonts.print("---%");
             } else {
+                // Temperatura
                 snprintf(buf, sizeof(buf), "%.1f", weatherData.outTemp);
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 84);
+                u8g2Fonts.setCursor(4, 72);
                 u8g2Fonts.print(buf);
                 int16_t tw = u8g2Fonts.getUTF8Width(buf);
                 u8g2Fonts.setFont(u8g2_font_profont10_mf);
-                u8g2Fonts.setCursor(4 + tw + 2, 84);
+                u8g2Fonts.setCursor(4 + tw + 2, 72);
                 u8g2Fonts.print("\xC2\xB0" "C");
 
+                // Vlaga
                 snprintf(buf, sizeof(buf), "%d%%", (int)weatherData.outHum);
-                u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 108);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
+                u8g2Fonts.setCursor(4, 85);
                 u8g2Fonts.print(buf);
             }
         }
 
-        // --- Vremenska ikona (desno, x=100, y=85) ---
+        // --- Vremenska ikona (desno, maximalna velikost v razpoložljivem prostoru) ---
+        // Razpoložljiv prostor desno: x od ~60 do 124, y od 52 do 114 → ~64×62px
+        // Center ikone: x=92, y=83
         if (weatherData.valid) {
-            wxDrawConditions(100, 85, weatherData.wxCode, weatherData.isNight);
+            const int wxScale = 7;
+            const int wxLS    = WX_ICON_LINESIZE;
+            wxDrawConditionsScaled(92, 83, weatherData.wxCode, weatherData.isNight, wxScale, wxLS);
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -368,6 +477,52 @@ static void wxAddTstorm(int x, int y, int scale) {
 static void wxAddFog(int x, int y, int scale) {
     for (int i = 0; i < 3; i++) {
         fillRect(x - scale*3, y + scale*(i+1), scale*6, WX_ICON_LINESIZE, GxEPD_BLACK);
+    }
+}
+
+// ── WMO weather_code → ikona z eksplicitnim scale parametrom ────────────
+void wxDrawConditionsScaled(int x, int y, uint8_t wxCode, bool isNight, int sc, int ls) {
+    if (wxCode == 0) {
+        if (isNight) wxAddMoon(x, y);
+        else         wxAddSun(x, y, sc);
+
+    } else if (wxCode <= 2) {
+        if (isNight) wxAddMoon(x - sc*2, y - sc*2);
+        else         wxAddSun(x - sc*2,  y - sc*2, sc - 2);
+        wxAddCloud(x, y, (int)(sc * 0.8f), ls);
+
+    } else if (wxCode == 3) {
+        wxAddCloud(x - sc, y - sc, sc/2, ls);
+        wxAddCloud(x,      y,      sc,   ls);
+
+    } else if (wxCode == 45 || wxCode == 48) {
+        wxAddFog(x, y, sc);
+
+    } else if (wxCode >= 51 && wxCode <= 67) {
+        wxAddCloud(x, y - sc/2, sc, ls);
+        wxAddRain(x, y - sc/2, sc);
+
+    } else if (wxCode >= 71 && wxCode <= 77) {
+        wxAddCloud(x, y - sc/2, sc, ls);
+        wxAddSnow(x, y - sc/2, sc);
+
+    } else if (wxCode >= 80 && wxCode <= 82) {
+        wxAddSun(x - sc*2, y - sc*2, sc - 2);
+        wxAddCloud(x, y - sc/2, sc, ls);
+        wxAddRain(x, y - sc/2, sc);
+
+    } else if (wxCode >= 85 && wxCode <= 86) {
+        wxAddCloud(x, y - sc/2, sc, ls);
+        wxAddSnow(x, y - sc/2, sc);
+
+    } else if (wxCode >= 95 && wxCode <= 99) {
+        wxAddCloud(x, y - sc/2, sc, ls);
+        wxAddTstorm(x, y - sc/2, sc);
+
+    } else {
+        u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+        u8g2Fonts.setCursor(x - 5, y + 8);
+        u8g2Fonts.print("?");
     }
 }
 

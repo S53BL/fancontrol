@@ -27,7 +27,7 @@ portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 float peakTemp = -999.0f;
 
 // --- Vremenski podatki ---
-WeatherData  weatherData   = { 0.0f, 0, 0, false, false, 0 };
+WeatherData  weatherData   = { 0.0f, 0, 0, false, false, 0, "--:--", "--:--" };
 unsigned long lastWeatherFetchMs = 0;
 
 // =============================================================================

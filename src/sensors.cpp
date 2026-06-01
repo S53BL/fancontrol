@@ -96,6 +96,9 @@ void readSensors() {
             sensorData.hum  = constrain(rawHum + settings.humOffset, 0.0f, 100.0f);
             sensorData.err &= ~ERR_SHT30;
             portEXIT_CRITICAL(&dataMux);
+            LOG_INFO("SENS", "SHT30: T=%.1fdegC  H=%.1f%%  (offset T=%.1f H=%.1f)",
+                     sensorData.temp, sensorData.hum,
+                     settings.tempOffset, settings.humOffset);
         }
     }
 
@@ -112,6 +115,7 @@ void readSensors() {
             sensorData.watt = 0.0f;
             sensorData.err &= ~ERR_INA219;
             portEXIT_CRITICAL(&dataMux);
+            LOG_INFO("SENS", "INA219: V=%.2fV  A=0.00A  W=0.0W  (PC izklopljen, V izven 8-15V)", rawVolt);
         } else {
             float corrAmp  = rawAmp * settings.currentCorr;
             float calcWatt = rawVolt * corrAmp;
@@ -122,6 +126,9 @@ void readSensors() {
             sensorData.err &= ~ERR_INA219;
             portEXIT_CRITICAL(&dataMux);
             updatePeakWatt();
+            LOG_INFO("SENS", "INA219: V=%.2fV  A=%.3fA  W=%.2fW  (korekcija=%.2fx, peak=%.1fW)",
+                     sensorData.volt, sensorData.amp, sensorData.watt,
+                     settings.currentCorr, sensorData.peakWatt);
         }
     }
 

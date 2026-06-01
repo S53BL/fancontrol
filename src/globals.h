@@ -9,9 +9,11 @@ struct WeatherData {
     float    outTemp;       // Zunanja temperatura [°C]
     uint8_t  outHum;        // Zunanja relativna vlažnost [%]
     uint8_t  wxCode;        // WMO weather_code (0–99)
-    bool     isNight;       // true če je ura med 22:00–06:00 (luna ikona)
+    bool     isNight;       // izračunano iz sunrise/sunset ob vsakem fetchWeather()
     bool     valid;         // false dokler ni prvi uspešen fetch
     uint8_t  err;           // 0=OK, 1=HTTP napaka, 2=parse napaka
+    char     sunrise[6];    // "HH:MM" — čas sončnega vzhoda
+    char     sunset[6];     // "HH:MM" — čas sončnega zahoda
 };
 
 // --- Senzorski podatki ---
@@ -23,8 +25,10 @@ struct SensorData {
     float    watt;      // Moč Mini PC [W] — INA219
     float    peakWatt;  // Maksimalna izmerjena moč od zagona [W] — za bar skalo
     uint8_t  fanPct;    // Hitrost ventilatorja [%]
-    bool     dndActive; // DND način aktiven
-    uint8_t  err;       // Bitmask napak (ErrorFlag)
+    bool     dndActive;  // DND način aktiven
+    bool     manualMode; // Ročni način ventilatorja aktiven
+    uint8_t  manualPct;  // Ročna vrednost [%]
+    uint8_t  err;        // Bitmask napak (ErrorFlag)
 };
 
 // --- Nastavitve (NVS) ---

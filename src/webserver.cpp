@@ -18,6 +18,7 @@
 #include <ezTime.h>
 #include <HTTPClient.h>
 #include "wifi_config.h"
+#include "uplot_assets.h"
 
 static AsyncWebServer server(80);
 
@@ -31,8 +32,9 @@ void fetchWeather() {
         return;
     }
 
-    char url[256];
+    char url[300];
     snprintf(url, sizeof(url), WEATHER_URL_TEMPLATE, WEATHER_LAT, WEATHER_LON);
+    LOG_INFO("WX", "URL: %s", url);
 
     HTTPClient http;
     http.begin(url);
@@ -46,39 +48,111 @@ void fetchWeather() {
         return;
     }
 
-    String body = http.getString();
+    // getString() — deluje tudi pri chunked transfer (Content-Length: -1)
+    String wxBody = http.getString();
     http.end();
 
-    // Filter: zadrži samo "current" objekt — drastično zmanjša porabo ArduinoJson memory pool
-    StaticJsonDocument<64> filter;
-    filter["current"]["temperature_2m"]      = true;
-    filter["current"]["relative_humidity_2m"] = true;
-    filter["current"]["weather_code"]         = true;
+    int bodyLen = wxBody.length();
+    LOG_INFO("WX", "HTTP body: %d bytes", bodyLen);
 
-    StaticJsonDocument<256> doc;
-    DeserializationError jerr = deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (bodyLen < 50) {
+        weatherData.err = 2;
+        LOG_WARN("WX", "HTTP body prekratek: %d bytes", bodyLen);
+        return;
+    }
+
+    // PSRAM buffer — kopiraj String v char* za deserializeJson
+    static char* _wxBuf = nullptr;
+    if (!_wxBuf) _wxBuf = (char*)ps_malloc(WEATHER_BUFFER_SIZE);
+    if (!_wxBuf) {
+        weatherData.err = 1;
+        LOG_WARN("WX", "ps_malloc za weather buffer failed");
+        return;
+    }
+    memset(_wxBuf, 0, WEATHER_BUFFER_SIZE);
+    strncpy(_wxBuf, wxBody.c_str(), WEATHER_BUFFER_SIZE - 1);
+    wxBody = String(); // sprosti heap String takoj
+
+    // Filter: current + daily[0] (sunrise, sunset)
+    StaticJsonDocument<128> filter;
+    filter["current"]["temperature_2m"]       = true;
+    filter["current"]["relative_humidity_2m"] = true;
+    filter["current"]["weather_code"]          = true;
+    filter["daily"]["sunrise"]                 = true;
+    filter["daily"]["sunset"]                  = true;
+
+    // DynamicJsonDocument — daily array potrebuje več prostora
+    DynamicJsonDocument doc(1024);
+    DeserializationError jerr = deserializeJson(doc, _wxBuf,
+                                                DeserializationOption::Filter(filter));
     if (jerr) {
         weatherData.err = 2;
         LOG_WARN("WX", "JSON parse napaka: %s", jerr.c_str());
+        LOG_WARN("WX", "Prvih 200 znakov odgovora: %.200s", _wxBuf);
         return;
     }
 
     portENTER_CRITICAL(&dataMux);
-    weatherData.outTemp = doc["current"]["temperature_2m"]       | 0.0f;
-    weatherData.outHum  = doc["current"]["relative_humidity_2m"] | 0;
-    weatherData.wxCode  = doc["current"]["weather_code"]         | 0;
-    weatherData.valid   = true;
-    weatherData.err     = 0;
 
-    // Nočni režim (luna ikona) med 22:00 in 06:00
-    if (timeSynced) {
-        int h = myTZ.dateTime("G").toInt();
+    weatherData.outTemp = doc["current"]["temperature_2m"]        | 0.0f;
+    weatherData.outHum  = doc["current"]["relative_humidity_2m"]  | 0;
+    weatherData.wxCode  = doc["current"]["weather_code"]          | 0;
+
+    // Sunrise / sunset — format iz API: "2026-06-01T05:23" → vzamemo samo HH:MM
+    const char* srRaw = doc["daily"]["sunrise"][0] | nullptr;
+    const char* ssRaw = doc["daily"]["sunset"][0]  | nullptr;
+
+    if (srRaw && strlen(srRaw) >= 16) {
+        // Format: "2026-06-01T05:23" — HH:MM je na poziciji 11
+        strncpy(weatherData.sunrise, srRaw + 11, 5);
+        weatherData.sunrise[5] = '\0';
+    } else {
+        strncpy(weatherData.sunrise, "--:--", 6);
+    }
+
+    if (ssRaw && strlen(ssRaw) >= 16) {
+        strncpy(weatherData.sunset, ssRaw + 11, 5);
+        weatherData.sunset[5] = '\0';
+    } else {
+        strncpy(weatherData.sunset, "--:--", 6);
+    }
+
+    // isNight — izračun iz sunrise/sunset (HH:MM formata)
+    weatherData.isNight = false;
+    if (timeSynced &&
+        weatherData.sunrise[0] != '-' &&
+        weatherData.sunset[0]  != '-') {
+        int curH  = myTZ.hour();
+        int curM  = myTZ.minute();
+        int curMin = curH * 60 + curM;
+
+        int srH = atoi(weatherData.sunrise);
+        int srM = atoi(weatherData.sunrise + 3);
+        int ssH = atoi(weatherData.sunset);
+        int ssM = atoi(weatherData.sunset + 3);
+
+        int srMin = srH * 60 + srM;
+        int ssMin = ssH * 60 + ssM;
+
+        weatherData.isNight = (curMin < srMin || curMin > ssMin);
+    } else if (timeSynced) {
+        // Fallback — stara logika če sunrise/sunset ni na voljo
+        int h = myTZ.hour();
         weatherData.isNight = (h >= 22 || h < 6);
     }
+
+    weatherData.valid = true;
+    weatherData.err   = 0;
+
     portEXIT_CRITICAL(&dataMux);
 
-    LOG_INFO("WX", "Vreme OK: %.1f°C %d%% wxCode=%d",
-             weatherData.outTemp, weatherData.outHum, weatherData.wxCode);
+    LOG_INFO("WX", "Vreme OK: %.1f degC  %d%%  wxCode=%d  vzh=%s  zah=%s  noc=%s",
+             weatherData.outTemp,
+             (int)weatherData.outHum,
+             (int)weatherData.wxCode,
+             weatherData.sunrise,
+             weatherData.sunset,
+             weatherData.isNight ? "DA" : "NE");
 }
 
 // =====================================================================
@@ -87,10 +161,10 @@ void fetchWeather() {
 static void connectWiFi() {
     WiFi.mode(WIFI_STA);
     IPAddress ip, gw, sn, dns;
-    ip.fromString(STATIC_IP);
-    gw.fromString(STATIC_GW);
-    sn.fromString(STATIC_SUBNET);
-    dns.fromString(STATIC_DNS);
+    ip.fromString(WIFI_STATIC_IP);
+    gw.fromString(WIFI_STATIC_GW);
+    sn.fromString(WIFI_STATIC_SUBNET);
+    dns.fromString(WIFI_STATIC_DNS);
     WiFi.config(ip, gw, sn, dns);
 
     // Najprej NVS (če je shranjeno)
@@ -132,18 +206,27 @@ static void connectWiFi() {
 // =====================================================================
 static void syncNTP() {
     if (WiFi.status() != WL_CONNECTED) return;
-    // Čisti ezTime pristop — brez mešanja s configTime()
-    setServer("pool.ntp.org");
+
     myTZ.setLocation(F("Europe/Ljubljana"));
-    waitForSync(10);
-    if (timeStatus() != timeNotSet) {
-        timeSynced = true;
-        lastNtpSyncMs = millis();
-        LOG_INFO("NTP", "Synced: %s", myTZ.dateTime("d.m.Y H:i:s").c_str());
-    } else {
-        LOG_WARN("NTP", "Sync timeout — brez NTP");
-        sensorData.err |= ERR_NTP;
+
+    for (int i = 0; i < NTP_SERVER_COUNT; i++) {
+        LOG_INFO("NTP", "Poskus [%d/%d]: %s", i + 1, NTP_SERVER_COUNT, NTP_SERVER_LIST[i]);
+        setServer(NTP_SERVER_LIST[i]);
+        waitForSync(8);
+        if (timeStatus() != timeNotSet) {
+            timeSynced = true;
+            lastNtpSyncMs = millis();
+            LOG_INFO("NTP", "Synced [%s]: %s",
+                     NTP_SERVER_LIST[i],
+                     myTZ.dateTime("d.m.Y H:i:s").c_str());
+            return;  // uspelo — ne nadaljuj z naslednjimi
+        }
+        LOG_WARN("NTP", "Timeout [%s] — naslednji...", NTP_SERVER_LIST[i]);
     }
+
+    // Vsi strežniki neuspešni
+    LOG_WARN("NTP", "Sync neuspesen — vsi strežniki brez odgovora");
+    sensorData.err |= ERR_NTP;
 }
 
 // =====================================================================
@@ -269,7 +352,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="card"><div class="ctit">Vlažnost</div><div><span class="cval" id="ch">--</span><span class="cunit"> %</span></div></div>
 <div class="card"><div class="ctit">Napetost</div><div><span class="cval" id="cv">--</span><span class="cunit"> V</span></div></div>
 <div class="card"><div class="ctit">Poraba</div><div><span class="cval" id="cw">--</span><span class="cunit"> W</span></div><div class="cpeak" id="pkw"></div></div>
-<div class="card"><div class="ctit">Ventilator</div><div><span class="cval" id="cf">--</span><span class="cunit"> %</span></div><div class="cdnd" id="cdnd"></div></div>
+<div class="card"><div class="ctit">Ventilator</div><div><span class="cval" id="cf">--</span><span class="cunit"> %</span></div><div class="cdnd" id="cdnd"></div><div class="cdnd" id="cman" style="color:#ff6b00"></div></div>
 <div class="card"><div class="ctit">&#9889; Napajanje</div><div class="cval" id="mpwr" style="font-size:20px">--</div></div>
 <div class="card"><div class="ctit">&#127760; Servisi</div><div><span class="cval" id="msvc" style="font-size:20px">--</span></div><div class="cpeak" id="msvd"></div></div>
 </div>
@@ -277,9 +360,23 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="ct2">Mini PC Servisi</div>
 <table id="monTbl"><tr><th>Port</th><th>Servis</th><th>Status</th></tr></table>
 </div>
-<div class="cw"><div class="ct2">Temperatura / Vlažnost</div><canvas id="gTH" height="90"></canvas></div>
-<div class="cw"><div class="ct2">Ventilator %</div><canvas id="gFan" height="60"></canvas></div>
-<div class="cw"><div class="ct2">Poraba [W]</div><canvas id="gW" height="60"></canvas></div>
+<div class="cw">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div class="ct2" style="margin:0">GRAF ZGODOVINE</div>
+    <button class="btn bsm" id="zoomReset" onclick="resetZoom()" style="display:none">Reset zoom</button>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px">
+    <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="cbTemp" checked style="accent-color:#e05252;width:13px;height:13px"> <span style="color:#e05252">Temperatura °C</span></label>
+    <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="cbHum" checked style="accent-color:#5b9bd5;width:13px;height:13px"> <span style="color:#5b9bd5">Vlažnost %</span></label>
+    <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="cbFan" checked style="accent-color:#4ec9b0;width:13px;height:13px"> <span style="color:#4ec9b0">Ventilator %</span></label>
+    <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="cbWatt" checked style="accent-color:#d4a76a;width:13px;height:13px"> <span style="color:#d4a76a">Poraba W</span></label>
+  </div>
+  <div id="uplotWrap" style="width:100%"></div>
+</div>
 </div>
 <!-- TAB 1: VENTILATOR -->
 <div class="pane" id="p1">
@@ -298,6 +395,32 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>DND od ure (0–23)</label><input type="number" id="dndF" min="0" max="23" style="width:70px"></div>
 <div class="fr"><label>DND do ure (0–23)</label><input type="number" id="dndT" min="0" max="23" style="width:70px"></div>
 <button class="btn" onclick="saveFan()">Shrani</button><span class="msg" id="msgF"></span>
+</div>
+<div class="sec"><h3>Ročno upravljanje</h3>
+<div class="fr" style="margin-bottom:14px">
+  <label style="min-width:170px">Način</label>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span id="modeLabel" style="font-size:12px;color:#aaa;min-width:80px">AVTOMATSKO</span>
+    <label style="position:relative;display:inline-block;width:44px;height:24px">
+      <input type="checkbox" id="manToggle" style="opacity:0;width:0;height:0" onchange="onManToggle()">
+      <span id="manSliderToggle" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#2a2a2a;border-radius:24px;transition:.3s">
+        <span id="manKnob" style="position:absolute;content:'';height:18px;width:18px;left:3px;bottom:3px;background:#555;border-radius:50%;transition:.3s"></span>
+      </span>
+    </label>
+  </div>
+</div>
+<div id="manSliderWrap" style="display:none;margin-bottom:10px">
+  <div class="fr">
+    <label style="min-width:170px">Hitrost [%]</label>
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <input type="range" id="manPct" min="0" max="100" value="0"
+             style="flex:1;accent-color:#00d4ff" oninput="onManSlider()">
+      <span id="manPctVal" style="color:#00d4ff;font-size:14px;min-width:36px;text-align:right">0%</span>
+    </div>
+  </div>
+</div>
+<button class="btn" id="manApplyBtn" style="display:none" onclick="applyManual()">Nastavi</button>
+<span class="msg" id="msgMan"></span>
 </div></div>
 <!-- TAB 2: KALIBRACIJA -->
 <div class="pane" id="p2">
@@ -326,7 +449,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="pane" id="p3">
 <div class="sec"><h3>Sistemske informacije</h3><div id="sysinfo"></div></div>
 <div class="sec">
-<h3>RAM Log &nbsp;<button class="btn bsm" onclick="fetchLog()">Osveži</button>&nbsp;<button class="btn bsm bto" onclick="clearLog()">Počisti</button></h3>
+<h3>RAM Log &nbsp;<button class="btn bsm" onclick="fetchLog()">Osveži</button>&nbsp;<button class="btn bsm bto" onclick="clearLog()">Počisti</button>&nbsp;<a class="btn bsm" href="/api/log/download" download style="text-decoration:none">Download</a></h3>
 <div style="overflow-x:auto;margin-top:10px">
 <table id="logtbl"><tr><th>Čas</th><th>Level</th><th>Tag</th><th>Sporočilo</th></tr></table>
 </div></div>
@@ -340,7 +463,8 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div id="otaSt" style="margin-top:8px;font-size:12px;color:#00d4ff"></div>
 </div></div>
 </main>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/uplot.css">
+<script src="/uplot.js"></script>
 <script>
 // Tab switching
 let atab=0,_fL=false,_cL=false,_mL=false;
@@ -348,33 +472,13 @@ function sw(i){
   document.querySelectorAll('.t').forEach((e,n)=>e.classList.toggle('on',n===i));
   document.querySelectorAll('.pane').forEach((e,n)=>e.classList.toggle('on',n===i));
   atab=i;
+  if(i===0 && !_uplot && _rawData) initUplot(_rawData);
+  if(i===0) loadHistory();
   if(i===1&&!_fL)loadFan();
   if(i===2&&!_cL)loadCal();
   if(i===2&&!_mL)loadMon();
   if(i===3){fetchSys();fetchLog();}
 }
-
-// Charts
-Chart.defaults.color='#555';Chart.defaults.borderColor='#222';
-function mkChart(id,ds,sc){
-  return new Chart(document.getElementById(id),{
-    type:'line',data:{labels:[],datasets:ds},
-    options:{responsive:true,animation:false,
-      plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:10}}}},
-      scales:sc}
-  });
-}
-const gTH=mkChart('gTH',[
-  {label:'Temp °C',data:[],borderColor:'#ff3b30',backgroundColor:'transparent',yAxisID:'y',tension:0.3,pointRadius:2},
-  {label:'Vlaga %',data:[],borderColor:'#555',backgroundColor:'transparent',yAxisID:'y2',tension:0.3,pointRadius:2}
-],{y:{title:{display:true,text:'°C',color:'#555'}},
-   y2:{position:'right',title:{display:true,text:'%',color:'#555'},grid:{drawOnChartArea:false}}});
-const gFan=mkChart('gFan',[
-  {label:'Fan %',data:[],borderColor:'#00d4ff',backgroundColor:'rgba(0,212,255,0.07)',tension:0.3,pointRadius:2,fill:true}
-],{y:{min:0,max:100}});
-const gW=mkChart('gW',[
-  {label:'Watt',data:[],borderColor:'#30d158',backgroundColor:'rgba(48,209,88,0.07)',tension:0.3,pointRadius:2,fill:true}
-],{y:{min:0}});
 
 function fUp(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return(h?h+'h ':'')+m+'m '+sec+'s';}
 
@@ -391,24 +495,231 @@ async function refreshData(){
     document.getElementById('cw').textContent=d.watt.toFixed(1);
     document.getElementById('cf').textContent=d.fan;
     document.getElementById('cdnd').textContent=d.dnd?'DND aktiven':'';
+    document.getElementById('cman').textContent=d.manual?'ROČNO':'';
+    // Sinhronizacija sliderja če je tab 1 odprt
+    if(atab===1){
+      const tog=document.getElementById('manToggle');
+      if(tog&&!tog.dataset.userEditing){
+        tog.checked=d.manual;
+        updateManUI(d.manual,d.manual_pct);
+      }
+    }
     document.getElementById('pkt').textContent=d.peak_temp>-900?'Peak: '+d.peak_temp.toFixed(1)+' °C':'';
     document.getElementById('pkw').textContent=d.peak_watt>0?'Peak: '+d.peak_watt.toFixed(1)+' W':'';
     if(atab===0)loadHistory();
   }catch(e){}
 }
 
-async function loadHistory(){
-  try{
-    const pts=await(await fetch('/api/history')).json();
-    const lb=pts.map(p=>{const d=new Date(p.ts*1000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');});
-    gTH.data.labels=gFan.data.labels=gW.data.labels=lb;
-    gTH.data.datasets[0].data=pts.map(p=>p.temp);
-    gTH.data.datasets[1].data=pts.map(p=>p.hum);
-    gTH.update('none');
-    gFan.data.datasets[0].data=pts.map(p=>p.fan);gFan.update('none');
-    gW.data.datasets[0].data=pts.map(p=>p.watt);gW.update('none');
-  }catch(e){}
+// ── uPlot graf ─────────────────────────────────────────────────────
+const COLORS = {
+  temp: '#e05252',
+  hum:  '#5b9bd5',
+  fan:  '#4ec9b0',
+  watt: '#d4a76a',
+  grid: getComputedStyle(document.documentElement)
+          .getPropertyValue('--color-border-tertiary').trim() || '#2a2a2a',
+  text: getComputedStyle(document.documentElement)
+          .getPropertyValue('--color-text-secondary').trim() || '#888',
+};
+
+let _uplot = null;
+let _rawData = null;
+let _zoomed  = false;
+
+function buildSeries() {
+  const cbT = document.getElementById('cbTemp').checked;
+  const cbH = document.getElementById('cbHum').checked;
+  const cbF = document.getElementById('cbFan').checked;
+  const cbW = document.getElementById('cbWatt').checked;
+
+  const series = [{}];
+  if (cbT) series.push({ label:'Temp °C', stroke:COLORS.temp, width:1.5,
+    fill:COLORS.temp+'18', scale:'temp',
+    value:(u,v)=>v==null?'--':v.toFixed(1)+' °C' });
+  if (cbH) series.push({ label:'Vlaga %', stroke:COLORS.hum,  width:1.5,
+    scale:'hum',
+    value:(u,v)=>v==null?'--':v.toFixed(0)+' %' });
+  if (cbF) series.push({ label:'Fan %',   stroke:COLORS.fan,  width:1.5,
+    scale:'fan',
+    value:(u,v)=>v==null?'--':v.toFixed(0)+' %' });
+  if (cbW) series.push({ label:'Watt',    stroke:COLORS.watt, width:1.5,
+    scale:'watt',
+    value:(u,v)=>v==null?'--':v.toFixed(1)+' W' });
+  return series;
 }
+
+function buildAxes() {
+  const cbT = document.getElementById('cbTemp').checked;
+  const cbH = document.getElementById('cbHum').checked;
+  const cbF = document.getElementById('cbFan').checked;
+  const cbW = document.getElementById('cbWatt').checked;
+  const axStyle = { stroke:COLORS.text, grid:{stroke:COLORS.grid,width:0.5},
+                    ticks:{show:false}, font:'10px monospace' };
+
+  const axes = [{
+    ...axStyle,
+    values:(u,vs)=>vs.map(v=>{
+      if(v==null)return'';
+      const d=new Date(v*1000);
+      return d.getHours().toString().padStart(2,'0')+':'+
+             d.getMinutes().toString().padStart(2,'0');
+    }),
+  }];
+
+  let leftDone = false;
+  if (cbT) { axes.push({...axStyle,scale:'temp',stroke:COLORS.temp,
+    label:'°C',size:42,side:leftDone?1:3}); if(!leftDone)leftDone=true; }
+  if (cbH) { axes.push({...axStyle,scale:'hum', stroke:COLORS.hum,
+    label:'%', size:42,side:leftDone?1:3,grid:{show:false}}); if(!leftDone)leftDone=true; }
+  if (cbF) { axes.push({...axStyle,scale:'fan', stroke:COLORS.fan,
+    label:'Fan%',size:48,side:1,grid:{show:false}}); }
+  if (cbW) { axes.push({...axStyle,scale:'watt',stroke:COLORS.watt,
+    label:'W',  size:42,side:1,grid:{show:false}}); }
+  return axes;
+}
+
+function buildScales() {
+  return {
+    x:    {},
+    temp: { range:(u,mn,mx)=>[mn-1, mx+1] },
+    hum:  { range:(u,mn,mx)=>[Math.max(0,mn-3), Math.min(100,mx+3)] },
+    fan:  { range:(u,mn,mx)=>[Math.max(0,mn-3), Math.min(100,mx+3)] },
+    watt: { range:(u,mn,mx)=>[Math.max(0,mn-0.5), mx+0.5] },
+  };
+}
+
+function buildData(raw) {
+  if (!raw) return [[]];
+  const cbT = document.getElementById('cbTemp').checked;
+  const cbH = document.getElementById('cbHum').checked;
+  const cbF = document.getElementById('cbFan').checked;
+  const cbW = document.getElementById('cbWatt').checked;
+  const out = [raw[0]];
+  if (cbT) out.push(raw[1]);
+  if (cbH) out.push(raw[2]);
+  if (cbF) out.push(raw[3]);
+  if (cbW) out.push(raw[4]);
+  return out;
+}
+
+function getPlotWidth() {
+  const wrap = document.getElementById('uplotWrap');
+  return wrap ? Math.max(300, wrap.clientWidth) : 600;
+}
+
+function initUplot(raw) {
+  _rawData = raw;
+  const wrap = document.getElementById('uplotWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const hasSeries = ['cbTemp','cbHum','cbFan','cbWatt']
+    .some(id => document.getElementById(id).checked);
+  if (!hasSeries) {
+    wrap.innerHTML = '<div style="text-align:center;color:#555;padding:40px;font-size:12px">Izberi vsaj en podatek</div>';
+    return;
+  }
+
+  const opts = {
+    width:  getPlotWidth(),
+    height: 220,
+    cursor: {
+      sync: { key: 'main' },
+      drag: { x: true, y: false, setScale: false },
+    },
+    select: { show: true },
+    legend: {
+      show: true,
+      live: true,
+      markers: { show: true },
+    },
+    axes:   buildAxes(),
+    scales: buildScales(),
+    series: buildSeries(),
+    hooks: {
+      setSelect: [u => {
+        const sel = u.select;
+        if (sel.width > 10) {
+          const xMin = u.posToVal(sel.left, 'x');
+          const xMax = u.posToVal(sel.left + sel.width, 'x');
+          u.setScale('x', { min: xMin, max: xMax });
+          u.setSelect({ left:0, top:0, width:0, height:0 }, false);
+          _zoomed = true;
+          const btn = document.getElementById('zoomReset');
+          if (btn) btn.style.display = '';
+        }
+      }],
+      dblclick: [u => { resetZoom(); }],
+    },
+  };
+
+  _uplot = new uPlot(opts, buildData(raw), wrap);
+}
+
+function resetZoom() {
+  if (!_uplot || !_rawData) return;
+  _uplot.setScale('x', { min: _rawData[0][0], max: _rawData[0][_rawData[0].length-1] });
+  _zoomed = false;
+  const btn = document.getElementById('zoomReset');
+  if (btn) btn.style.display = 'none';
+}
+
+function rebuildUplot() {
+  if (_rawData) initUplot(_rawData);
+}
+
+['cbTemp','cbHum','cbFan','cbWatt'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', rebuildUplot);
+});
+
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    if (_uplot) _uplot.setSize({ width: getPlotWidth(), height: 220 });
+  }, 150);
+});
+
+async function loadHistory() {
+  try {
+    const pts = await (await fetch('/api/history')).json();
+    if (!pts || pts.length === 0) return;
+
+    const n    = pts.length;
+    const xs   = new Float64Array(n);
+    const temp = new Float64Array(n);
+    const hum  = new Float64Array(n);
+    const fan  = new Float64Array(n);
+    const watt = new Float64Array(n);
+
+    for (let i = 0; i < n; i++) {
+      xs[i]   = pts[i].ts;
+      temp[i] = pts[i].temp;
+      hum[i]  = pts[i].hum;
+      fan[i]  = pts[i].fan;
+      watt[i] = pts[i].watt;
+    }
+
+    const raw = [xs, temp, hum, fan, watt];
+
+    if (!_uplot) {
+      initUplot(raw);
+    } else if (!_zoomed) {
+      _rawData = raw;
+      _uplot.setData(buildData(raw));
+    } else {
+      _rawData = raw;
+      const curMin = _uplot.scales.x.min;
+      const curMax = _uplot.scales.x.max;
+      _uplot.setData(buildData(raw));
+      _uplot.setScale('x', { min: curMin, max: curMax });
+    }
+  } catch(e) {
+    console.warn('loadHistory error:', e);
+  }
+}
+// ── konec uPlot ────────────────────────────────────────────────────
 
 setInterval(refreshData,5000);
 refreshData();
@@ -480,6 +791,14 @@ async function loadFan(){
     document.getElementById('dndE').checked=s.dndEnabled;
     document.getElementById('dndF').value=s.dndFrom;
     document.getElementById('dndT').value=s.dndTo;
+    // Naloži stanje ročnega načina
+    try{
+      const m=await(await fetch('/api/fan/manual')).json();
+      document.getElementById('manToggle').checked=m.manual;
+      document.getElementById('manPct').value=m.pct;
+      document.getElementById('manPctVal').textContent=m.pct+'%';
+      updateManUI(m.manual,m.pct);
+    }catch(e){}
     _fL=true;
   }catch(e){}
 }
@@ -562,6 +881,57 @@ async function clearLog(){
   try{await fetch('/api/log/clear',{method:'POST'});fetchLog();}catch(e){}
 }
 
+function updateManUI(isMan,pct){
+  const lbl=document.getElementById('modeLabel');
+  const wrap=document.getElementById('manSliderWrap');
+  const btn=document.getElementById('manApplyBtn');
+  const knob=document.getElementById('manKnob');
+  const track=document.getElementById('manSliderToggle');
+  if(isMan){
+    lbl.textContent='ROČNO';lbl.style.color='#ff6b00';
+    wrap.style.display='';btn.style.display='';
+    track.style.background='#ff6b00';knob.style.left='23px';
+  }else{
+    lbl.textContent='AVTOMATSKO';lbl.style.color='#aaa';
+    wrap.style.display='none';btn.style.display='none';
+    track.style.background='#2a2a2a';knob.style.left='3px';
+  }
+  if(pct!==undefined){
+    document.getElementById('manPct').value=pct;
+    document.getElementById('manPctVal').textContent=pct+'%';
+  }
+}
+function onManToggle(){
+  const tog=document.getElementById('manToggle');
+  tog.dataset.userEditing='1';
+  updateManUI(tog.checked);
+  if(!tog.checked){
+    fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({manual:false,pct:0})})
+    .then(()=>{
+      const m=document.getElementById('msgMan');
+      m.textContent='Avtomatsko';m.style.color='#30d158';
+      setTimeout(()=>{m.textContent='';delete tog.dataset.userEditing;},2000);
+    });
+  }else{
+    delete tog.dataset.userEditing;
+  }
+}
+function onManSlider(){
+  const v=document.getElementById('manPct').value;
+  document.getElementById('manPctVal').textContent=v+'%';
+}
+async function applyManual(){
+  const pct=parseInt(document.getElementById('manPct').value)||0;
+  const r=await fetch('/api/fan/manual',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({manual:true,pct:pct})});
+  const m=document.getElementById('msgMan');
+  m.textContent=r.ok?'Nastavljeno '+pct+'%':'Napaka!';
+  m.style.color=r.ok?'#30d158':'#ff3b30';
+  setTimeout(()=>m.textContent='',3000);
+}
+
 // OTA upload
 document.getElementById('otaF').onsubmit=function(e){
   e.preventDefault();
@@ -609,6 +979,22 @@ void initWebserver() {
         request->send_P(200, "text/html; charset=UTF-8", MAIN_HTML);
     });
 
+    // --- GET /uplot.js → uPlot knjižnica iz PROGMEM ---
+    server.on("/uplot.js", HTTP_GET, [](AsyncWebServerRequest *request){
+        AsyncWebServerResponse *resp = request->beginResponse_P(
+            200, "application/javascript", UPLOT_JS);
+        resp->addHeader("Cache-Control", "public, max-age=86400");
+        request->send(resp);
+    });
+
+    // --- GET /uplot.css → uPlot CSS iz PROGMEM ---
+    server.on("/uplot.css", HTTP_GET, [](AsyncWebServerRequest *request){
+        AsyncWebServerResponse *resp = request->beginResponse_P(
+            200, "text/css", UPLOT_CSS);
+        resp->addHeader("Cache-Control", "public, max-age=86400");
+        request->send(resp);
+    });
+
     // --- GET /api/data → JSON trenutnih vrednosti ---
     server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request){
         StaticJsonDocument<768> doc;
@@ -618,6 +1004,8 @@ void initWebserver() {
         float peakWattVal = sensorData.peakWatt;
         uint8_t fan = sensorData.fanPct;
         bool dnd = sensorData.dndActive;
+        bool  manMode = sensorData.manualMode;
+        uint8_t manPct = sensorData.manualPct;
         uint8_t err = sensorData.err;
         float outTemp = weatherData.outTemp;
         uint8_t outHum = weatherData.outHum;
@@ -631,7 +1019,9 @@ void initWebserver() {
         doc["amp"]       = serialized(String(amp, 3));
         doc["watt"]      = serialized(String(watt, 1));
         doc["fan"]       = fan;
-        doc["dnd"]       = dnd;
+        doc["dnd"]        = dnd;
+        doc["manual"]     = manMode;
+        doc["manual_pct"] = manPct;
         doc["peak_temp"] = serialized(String(peakTemp, 1));
         doc["peak_watt"] = serialized(String(peakWattVal, 1));
         doc["out_temp"]  = serialized(String(outTemp, 1));
@@ -644,7 +1034,7 @@ void initWebserver() {
         doc["time"]   = tbuf;
         doc["uptime"] = millis() / 1000;
         doc["rssi"]   = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
-        doc["ip"]     = STATIC_IP;
+        doc["ip"]     = WIFI_STATIC_IP;
         doc["err"]    = err;
         doc["fw"]     = FW_VERSION;
         doc["heap"]   = ESP.getFreeHeap();
@@ -657,25 +1047,26 @@ void initWebserver() {
     // --- GET /api/history → JSON array za grafe ---
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request){
         int cnt = graphGetCount();
-        String json = "[";
+        AsyncResponseStream *resp = request->beginResponseStream("application/json");
+        resp->print("[");
         for (int i = 0; i < cnt; i++) {
             GraphPoint p = graphGetPoint(i);
-            if (i > 0) json += ",";
+            if (i > 0) resp->print(",");
             char buf[96];
             snprintf(buf, sizeof(buf),
                      "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.0f,\"watt\":%.1f,\"fan\":%u}",
                      (unsigned long)p.ts, p.temp, p.hum, p.watt, (unsigned)p.fanPct);
-            json += buf;
+            resp->print(buf);
         }
-        json += "]";
-        request->send(200, "application/json", json);
+        resp->print("]");
+        request->send(resp);
     });
 
     // --- GET /api/log → JSON array zadnjih 50 vnosov ---
     server.on("/api/log", HTTP_GET, [](AsyncWebServerRequest *request){
         int count = logGetCount();
         int start = (count > 50) ? count - 50 : 0;
-        DynamicJsonDocument doc(10240);
+        DynamicJsonDocument doc(32768);
         JsonArray arr = doc.to<JsonArray>();
         for (int i = start; i < count; i++) {
             LogEntry e = logGetEntry(i);
@@ -697,6 +1088,80 @@ void initWebserver() {
         LOG_INFO("WEB", "/api/log/clear");
         request->send(200, "application/json", "{\"status\":\"cleared\"}");
     });
+
+    // --- GET /api/log/download → plaintext log za download z datumom v imenu ---
+    server.on("/api/log/download", HTTP_GET, [](AsyncWebServerRequest *request){
+        char fname[48];
+        if (timeSynced) {
+            snprintf(fname, sizeof(fname),
+                     "fancontrol_log_%04d-%02d-%02d_%02d-%02d.txt",
+                     myTZ.year(), myTZ.month(), myTZ.day(),
+                     myTZ.hour(), myTZ.minute());
+        } else {
+            unsigned long s = millis() / 1000;
+            snprintf(fname, sizeof(fname), "fancontrol_log_uptime_%lus.txt", s);
+        }
+
+        char disp[80];
+        snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", fname);
+
+        int count = logGetCount();
+        AsyncResponseStream *resp = request->beginResponseStream("text/plain; charset=UTF-8");
+        resp->addHeader("Content-Disposition", disp);
+        char line[180];
+        for (int i = 0; i < count; i++) {
+            LogEntry e = logGetEntry(i);
+            const char* lvl = (e.level == LOG_LVL_ERROR) ? "ERR" :
+                              (e.level == LOG_LVL_WARN)  ? "WRN" : "INF";
+            snprintf(line, sizeof(line), "[%s][%s][%s] %s\n",
+                     e.time, lvl, e.tag, e.msg);
+            resp->print(line);
+        }
+        request->send(resp);
+        LOG_INFO("WEB", "/api/log/download — %d vnosov, ime: %s", count, fname);
+    });
+
+    // --- GET /api/fan/manual → vrni trenutno stanje ročnega načina ---
+    server.on("/api/fan/manual", HTTP_GET, [](AsyncWebServerRequest *request){
+        StaticJsonDocument<64> doc;
+        doc["manual"] = isManualMode();
+        doc["pct"]    = getManualPct();
+        String resp;
+        serializeJson(doc, resp);
+        request->send(200, "application/json", resp);
+    });
+
+    // --- POST /api/fan/manual → nastavi ročni način ---
+    server.on("/api/fan/manual", HTTP_POST,
+        [](AsyncWebServerRequest *request){},
+        NULL,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+           size_t index, size_t total){
+            static char*  _manBodyBuf = nullptr;
+            static size_t _manBodyLen = 0;
+            if (index == 0) {
+                if (!_manBodyBuf) _manBodyBuf = (char*)ps_malloc(256);
+                if (!_manBodyBuf) { request->send(500, "text/plain", "OOM"); return; }
+                _manBodyLen = 0;
+                memset(_manBodyBuf, 0, 256);
+            }
+            size_t _manCopy = min(len, (size_t)(255 - _manBodyLen));
+            memcpy(_manBodyBuf + _manBodyLen, data, _manCopy);
+            _manBodyLen += _manCopy;
+            if (index + len != total) return;
+
+            StaticJsonDocument<64> doc;
+            DeserializationError err = deserializeJson(doc, _manBodyBuf);
+            if (err) {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            bool    enable = doc["manual"] | false;
+            uint8_t pct    = constrain((int)(doc["pct"] | 0), 0, 100);
+            setManualMode(enable, pct);
+            request->send(200, "application/json", "{\"status\":\"OK\"}");
+        }
+    );
 
     // --- GET /api/fansettings → za pre-fill Tab 1 ---
     server.on("/api/fansettings", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -737,13 +1202,21 @@ void initWebserver() {
         NULL,
         [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
            size_t index, size_t total){
-            static String body;
-            if (index == 0) body = "";
-            for (size_t i = 0; i < len; i++) body += (char)data[i];
+            static char* _fanBodyBuf = nullptr;
+            static size_t _fanBodyLen = 0;
+            if (index == 0) {
+                if (!_fanBodyBuf) _fanBodyBuf = (char*)ps_malloc(2048);
+                if (!_fanBodyBuf) { request->send(500, "text/plain", "OOM"); return; }
+                _fanBodyLen = 0;
+                memset(_fanBodyBuf, 0, 2048);
+            }
+            size_t copyLen = min(len, (size_t)(2047 - _fanBodyLen));
+            memcpy(_fanBodyBuf + _fanBodyLen, data, copyLen);
+            _fanBodyLen += copyLen;
             if (index + len != total) return;
 
             StaticJsonDocument<512> doc;
-            DeserializationError err = deserializeJson(doc, body);
+            DeserializationError err = deserializeJson(doc, _fanBodyBuf);
             if (err) {
                 LOG_ERROR("WEB", "/save/fan JSON error: %s", err.c_str());
                 request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
@@ -795,13 +1268,21 @@ void initWebserver() {
         NULL,
         [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
            size_t index, size_t total){
-            static String body;
-            if (index == 0) body = "";
-            for (size_t i = 0; i < len; i++) body += (char)data[i];
+            static char* _calBodyBuf = nullptr;
+            static size_t _calBodyLen = 0;
+            if (index == 0) {
+                if (!_calBodyBuf) _calBodyBuf = (char*)ps_malloc(2048);
+                if (!_calBodyBuf) { request->send(500, "text/plain", "OOM"); return; }
+                _calBodyLen = 0;
+                memset(_calBodyBuf, 0, 2048);
+            }
+            size_t copyLen = min(len, (size_t)(2047 - _calBodyLen));
+            memcpy(_calBodyBuf + _calBodyLen, data, copyLen);
+            _calBodyLen += copyLen;
             if (index + len != total) return;
 
             StaticJsonDocument<512> doc;
-            DeserializationError err = deserializeJson(doc, body);
+            DeserializationError err = deserializeJson(doc, _calBodyBuf);
             if (err) {
                 LOG_ERROR("WEB", "/save/cal JSON error: %s", err.c_str());
                 request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
@@ -893,13 +1374,21 @@ void initWebserver() {
         NULL,
         [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
            size_t index, size_t total){
-            static String body;
-            if (index == 0) body = "";
-            for (size_t i = 0; i < len; i++) body += (char)data[i];
+            static char* _monBodyBuf = nullptr;
+            static size_t _monBodyLen = 0;
+            if (index == 0) {
+                if (!_monBodyBuf) _monBodyBuf = (char*)ps_malloc(2048);
+                if (!_monBodyBuf) { request->send(500, "text/plain", "OOM"); return; }
+                _monBodyLen = 0;
+                memset(_monBodyBuf, 0, 2048);
+            }
+            size_t copyLen = min(len, (size_t)(2047 - _monBodyLen));
+            memcpy(_monBodyBuf + _monBodyLen, data, copyLen);
+            _monBodyLen += copyLen;
             if (index + len != total) return;
 
             StaticJsonDocument<1024> doc;
-            DeserializationError err = deserializeJson(doc, body);
+            DeserializationError err = deserializeJson(doc, _monBodyBuf);
             if (err) {
                 LOG_ERROR("WEB", "/save/monitor JSON error: %s", err.c_str());
                 request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
@@ -970,7 +1459,7 @@ void initWebserver() {
     );
 
     server.begin();
-    LOG_INFO("WEB", "Server started on %s", STATIC_IP);
+    LOG_INFO("WEB", "Server started on %s", WIFI_STATIC_IP);
 }
 
 // =====================================================================

@@ -1,9 +1,12 @@
 // fan.cpp — Implementacija PWM krmiljenja ventilatorja
 #include "fan.h"
 #include "globals.h"
+#include "logging.h"
 #include <Arduino.h>
 
 static uint8_t _fanPct = 0;
+static bool    _manualMode = false;
+static uint8_t _manualPct  = 0;
 
 // --- Linearna interpolacija temperaturne krivulje ---
 // Vrne ciljni % (0–100) glede na temperaturo in settings.curveTemp/curvePct
@@ -34,7 +37,7 @@ void initFan() {
     ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
     // Zaščita: ne izklopimo ventilatorja ob zagonu
     setFanPct(settings.fanMinPct);
-    Serial.printf("[Fan] Init OK — min %d%%\n", settings.fanMinPct);
+    LOG_INFO("FAN", "Init OK — min %d%%", settings.fanMinPct);
 }
 
 // --- Direktna nastavitev hitrosti [0–100%] ---
@@ -80,6 +83,13 @@ bool isDndActive() {
 
 // --- Posodobitev hitrosti ventilatorja (klic iz loop) ---
 void updateFan() {
+    // Ročni način — preskoči krivuljo in DND popolnoma
+    if (_manualMode) {
+        setFanPct(_manualPct);
+        LOG_INFO("FAN", "ROCNO %d%%", _manualPct);
+        return;
+    }
+
     // Preberi temperaturo pod mutex zaščito
     float temp;
     portENTER_CRITICAL(&dataMux);
@@ -95,7 +105,7 @@ void updateFan() {
     // Izračunaj ciljni % iz temperaturne krivulje
     uint8_t pct = interpolateCurve(temp);
 
-    // DND korekcija — omeji maksimum
+    // DND korekcija — omeji maksimum (samo v avtomatskem načinu)
     if (isDndActive()) {
         pct = min(pct, settings.dndMaxPct);
     }
@@ -104,6 +114,32 @@ void updateFan() {
     pct = max(pct, settings.fanMinPct);
 
     setFanPct(pct);
-    Serial.printf("[Fan] T=%.1f°C → %d%% (DND=%s)\n",
-                  temp, pct, sensorData.dndActive ? "ON" : "off");
+    LOG_INFO("FAN", "T=%.1f C -> %d%% DND=%s",
+             temp, pct, sensorData.dndActive ? "ON" : "off");
+}
+
+// --- Ročni način ---
+void setManualMode(bool enabled, uint8_t pct) {
+    _manualMode = enabled;
+    _manualPct  = constrain(pct, 0, 100);
+
+    portENTER_CRITICAL(&dataMux);
+    sensorData.manualMode = enabled;
+    sensorData.manualPct  = _manualPct;
+    portEXIT_CRITICAL(&dataMux);
+
+    if (enabled) {
+        LOG_INFO("FAN", "Rocni nacin ON — %d%%", _manualPct);
+    } else {
+        LOG_INFO("FAN", "Rocni nacin OFF — vrni na avto");
+    }
+    updateFan();
+}
+
+bool isManualMode() {
+    return _manualMode;
+}
+
+uint8_t getManualPct() {
+    return _manualPct;
 }

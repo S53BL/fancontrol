@@ -71,13 +71,28 @@ void setup() {
         LOG_WARN("BOOT", "ePaper: ni priključen ali BUSY timeout — nadaljujem brez zaslona");
     } else {
         LOG_INFO("BOOT", "ePaper OK");
+        showBootScreen();
+        LOG_INFO("BOOT", "Boot screen prikazan");
     }
 
     // 9. WiFi + NTP + Web (LED rumena med povezovanjem)
     ledYellow();
     initWebserver();
 
-    // 10. Končni LED status
+    // 10. Weather — eksplicitno ob zagonu (ne čakamo prve iteracije loopa)
+    LOG_INFO("BOOT", "Pridobivam vremenske podatke...");
+    fetchWeather();
+
+    // 11. Prvo branje senzorjev + izračun ventilatorja
+    // delay(50) — SHT30 potrebuje ~15ms za prvo meritev po Wire.begin()
+    LOG_INFO("BOOT", "Prvo branje senzorjev...");
+    delay(50);
+    readSensors();
+    updateFan();
+    LOG_INFO("BOOT", "Senzorji in fan OK — fan=%d%%  err=0x%02X",
+             sensorData.fanPct, sensorData.err);
+
+    // 12. Končni LED status
     if (sensorData.err == ERR_NONE) {
         ledGreen();
         LOG_INFO("BOOT", "Boot complete — vse OK");
@@ -90,6 +105,15 @@ void setup() {
     }
 
     Serial.println("=== Boot complete ===");
+
+    // 13. Kratek delay — WiFi/NTP/Weather stack se ustali
+    if (!(sensorData.err & ERR_DISPLAY)) {
+        LOG_INFO("BOOT", "Cakam 7s pred prvim display refresh...");
+        delay(7000);
+        updateDisplay();
+        lastDisplayRefreshMs = millis();
+        LOG_INFO("BOOT", "Prvi display refresh OK");
+    }
 }
 
 void loop() {

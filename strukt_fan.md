@@ -23,6 +23,7 @@ fancontrol/
     ├── main.cpp
     ├── sensors.cpp
     ├── sensors.h
+    ├── uplot_assets.h
     ├── webserver.cpp
     ├── webserver.h
     └── wifi_config.example.h
@@ -32,6 +33,7 @@ fancontrol/
 
 | Datoteka | Raw link |
 |----------|----------|
+| `src/uplot_assets.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/uplot_assets.h |
 | `src/config.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/config.h |
 | `src/display.cpp` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/display.cpp |
 | `src/display.h` | https://raw.githubusercontent.com/S53BL/fancontrol/main/src/display.h |

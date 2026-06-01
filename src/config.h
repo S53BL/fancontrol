@@ -79,7 +79,7 @@
 #define EPD_HEIGHT          296
 
 // --- Graf buffer (PSRAM) ---
-#define GRAPH_BUFFER_SIZE   60      // 60 točk = 60 minut
+#define GRAPH_BUFFER_SIZE   10080   // 7 dni @ 1 točka/min (10080 min)
 
 // --- Napake (bitmask) ---
 enum ErrorFlag : uint8_t {
@@ -95,23 +95,19 @@ enum ErrorFlag : uint8_t {
 #define ERR_FLOAT   -999.0f
 
 // --- Logging ---
-#define LOG_BUFFER_ENTRIES  200        // Število vnosov v RAM log bufferju (PSRAM)
+#define LOG_BUFFER_ENTRIES  10000      // ~24h log @ ~7 vnosov/min (PSRAM)
 #define LOG_MAX_MSG_LEN     120        // Max dolžina enega log sporočila
 
 // --- Mreža ---
-#define STATIC_IP           "192.168.2.169"
-#define STATIC_GW           "192.168.2.1"
-#define STATIC_SUBNET       "255.255.255.0"
-#define STATIC_DNS          "8.8.8.8"
-#define MDNS_HOSTNAME       "fancontrol"   // http://fancontrol.local
+#define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "0.7.0"
+#define FW_VERSION          "0.9.4"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
 // Preveri schematic plošče — pogosta alternativa je GPIO21.
-#define PIN_RGB_LED         21      // TODO: preveri na schematiku TZT plošče
+#define PIN_RGB_LED         48      // Potrebno premostiti mosticek na PCB-ju, da se uporabi GPIO48 
 #define RGB_BRIGHTNESS      50      // 0–255, nizko da ne slepi
 
 // --- Boot ---
@@ -123,7 +119,8 @@ enum ErrorFlag : uint8_t {
 #define WEATHER_FETCH_INTERVAL  1800000UL  // 30 minut v ms
 #define WEATHER_LAT             "46.05"    // Ljubljana — nastavi po potrebi
 #define WEATHER_LON             "14.51"    // Ljubljana — nastavi po potrebi
-#define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code"
+#define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code&daily=sunrise,sunset&timezone=Europe%%2FLjubljana"
+#define WEATHER_BUFFER_SIZE     4096    // PSRAM buffer za weather JSON odgovor
 
 // --- Peak watt avtokalibracija ---
 #define PEAK_WATT_NVS_KEY       "peakWatt"  // Ključ v NVS za persistenco
