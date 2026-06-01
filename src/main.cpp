@@ -82,6 +82,7 @@ void setup() {
     // 10. Weather — eksplicitno ob zagonu (ne čakamo prve iteracije loopa)
     LOG_INFO("BOOT", "Pridobivam vremenske podatke...");
     fetchWeather();
+    lastWeatherFetchMs = millis();  // prepreči ponovni fetch na prvi loop iteraciji
 
     // 11. Prvo branje senzorjev + izračun ventilatorja
     // delay(50) — SHT30 potrebuje ~15ms za prvo meritev po Wire.begin()

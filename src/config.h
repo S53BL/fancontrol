@@ -116,7 +116,7 @@ enum ErrorFlag : uint8_t {
 #define EPD_BUSY_TIMEOUT_MS    3000   // Max čakanje na BUSY LOW pri init [ms]
 
 // --- Open-Meteo vremenski API ---
-#define WEATHER_FETCH_INTERVAL  1800000UL  // 30 minut v ms
+#define WEATHER_FETCH_INTERVAL  3600000UL  // 60 minut v ms
 #define WEATHER_LAT             "46.05"    // Ljubljana — nastavi po potrebi
 #define WEATHER_LON             "14.51"    // Ljubljana — nastavi po potrebi
 #define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code&daily=sunrise,sunset&timezone=Europe%%2FLjubljana"
@@ -133,7 +133,7 @@ enum ErrorFlag : uint8_t {
 
 // --- Mini PC Monitor ---
 #define MONITOR_TCP_TIMEOUT_MS     500      // TCP connect timeout [ms]
-#define MONITOR_MAX_PORTS          8        // Max portov v nastavitvah
+#define MONITOR_MAX_PORTS          9        // Max portov v nastavitvah (3x3 grid)
 
 #define MONITOR_DEFAULT_IP         "192.168.2.5"
 #define MONITOR_DEFAULT_WATT_THR   3.0f     // Pod tem = Mini PC izklopljen [W]
@@ -146,3 +146,4 @@ enum ErrorFlag : uint8_t {
 #define MONITOR_PORT_4    465,  "SMTPS",   true
 #define MONITOR_PORT_5    993,  "IMAP-S",  true
 #define MONITOR_PORT_6    8443, "Webmail", true
+#define MONITOR_PORT_7    0,    "",        false  // opcijski slot

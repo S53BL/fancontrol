@@ -5,9 +5,9 @@
 #pragma once
 
 // Seznam WiFi omrežij — poskuša po vrsti dokler se ne poveže
-static const char* WIFI_SSID_LIST[]   = {"Omrezje1", "Omrezje2"};
-static const char* WIFI_PASS_LIST[]   = {"Geslo1",   "Geslo2"};
-static const int   WIFI_NETWORK_COUNT = 2;
+static const char* WIFI_SSID_LIST[]   = {"Omrezje1", "Omrezje2", "Omrezje3"};
+static const char* WIFI_PASS_LIST[]   = {"Geslo1",   "Geslo2",   "Geslo3"};
+static const int   WIFI_NETWORK_COUNT = 3;
 
 // --- Statični IP (ESP32) ---
 static const char* WIFI_STATIC_IP     = "192.168.x.x";

@@ -86,6 +86,7 @@ static void initDefaults() {
         {MONITOR_PORT_4},
         {MONITOR_PORT_5},
         {MONITOR_PORT_6},
+        {MONITOR_PORT_7},
     };
     constexpr int kPortCount = (int)(sizeof(kPorts) / sizeof(kPorts[0]));
     for (int i = 0; i < kPortCount && i < MONITOR_MAX_PORTS; i++) {
