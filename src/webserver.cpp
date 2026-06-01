@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "graph_store.h"
 #include "fan.h"
+#include "monitor.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -269,6 +270,12 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="card"><div class="ctit">Napetost</div><div><span class="cval" id="cv">--</span><span class="cunit"> V</span></div></div>
 <div class="card"><div class="ctit">Poraba</div><div><span class="cval" id="cw">--</span><span class="cunit"> W</span></div><div class="cpeak" id="pkw"></div></div>
 <div class="card"><div class="ctit">Ventilator</div><div><span class="cval" id="cf">--</span><span class="cunit"> %</span></div><div class="cdnd" id="cdnd"></div></div>
+<div class="card"><div class="ctit">&#9889; Napajanje</div><div class="cval" id="mpwr" style="font-size:20px">--</div></div>
+<div class="card"><div class="ctit">&#127760; Servisi</div><div><span class="cval" id="msvc" style="font-size:20px">--</span></div><div class="cpeak" id="msvd"></div></div>
+</div>
+<div id="monBox" class="cw" style="display:none">
+<div class="ct2">Mini PC Servisi</div>
+<table id="monTbl"><tr><th>Port</th><th>Servis</th><th>Status</th></tr></table>
 </div>
 <div class="cw"><div class="ct2">Temperatura / Vlažnost</div><canvas id="gTH" height="90"></canvas></div>
 <div class="cw"><div class="ct2">Ventilator %</div><canvas id="gFan" height="60"></canvas></div>
@@ -306,6 +313,14 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>SSID</label><input type="text" id="wSsid" maxlength="31" style="width:200px"></div>
 <div class="fr"><label>Geslo</label><input type="password" id="wPass" maxlength="63" style="width:200px"></div>
 <button class="btn" onclick="saveCal()">Shrani</button><span class="msg" id="msgC"></span>
+</div>
+<div class="sec"><h3>Mini PC Monitor</h3>
+<div class="fr"><label>IP naslov</label><input type="text" id="mIp" maxlength="15" style="width:140px"></div>
+<div class="fr"><label>Prag porabe [W]</label><input type="number" id="mWth" step="0.1" min="0" style="width:80px"></div>
+<div style="overflow-x:auto;margin:10px 0">
+<table id="mPortTbl"><tr><th>Port</th><th>Ime</th><th>Enable</th></tr></table>
+</div>
+<button class="btn" onclick="saveMon()">Shrani monitor</button><span class="msg" id="msgM"></span>
 </div></div>
 <!-- TAB 3: SISTEM -->
 <div class="pane" id="p3">
@@ -328,13 +343,14 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 // Tab switching
-let atab=0,_fL=false,_cL=false;
+let atab=0,_fL=false,_cL=false,_mL=false;
 function sw(i){
   document.querySelectorAll('.t').forEach((e,n)=>e.classList.toggle('on',n===i));
   document.querySelectorAll('.pane').forEach((e,n)=>e.classList.toggle('on',n===i));
   atab=i;
   if(i===1&&!_fL)loadFan();
   if(i===2&&!_cL)loadCal();
+  if(i===2&&!_mL)loadMon();
   if(i===3){fetchSys();fetchLog();}
 }
 
@@ -396,6 +412,62 @@ async function loadHistory(){
 
 setInterval(refreshData,5000);
 refreshData();
+
+// Monitor kartici + tabela portov (osveži vsakih 30s)
+async function refreshMonitor(){
+  try{
+    const d=await(await fetch('/api/monitor')).json();
+    document.getElementById('mpwr').textContent=d.powered?'ON':'OFF';
+    document.getElementById('mpwr').style.color=d.powered?'#30d158':'#ff9500';
+    document.getElementById('msvc').textContent=d.port_ok+'/'+d.port_total;
+    document.getElementById('msvd').textContent=d.all_ok?'VSI OK':'NAPAKA';
+    const box=document.getElementById('monBox');
+    box.style.display='';
+    const t=document.getElementById('monTbl');
+    t.innerHTML='<tr><th>Port</th><th>Servis</th><th>Status</th></tr>';
+    d.ports.forEach(p=>{
+      if(!p.enabled)return;
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${p.port}</td><td>${p.name}</td><td>${p.ok?'&#10003;':'&#10007;'}</td>`;
+      t.appendChild(tr);
+    });
+  }catch(e){}
+}
+setInterval(refreshMonitor,30000);
+refreshMonitor();
+
+// Naloži monitor nastavitve za Tab 2
+async function loadMon(){
+  try{
+    const s=await(await fetch('/api/monitorsettings')).json();
+    document.getElementById('mIp').value=s.monitorIp;
+    document.getElementById('mWth').value=s.wattThreshold;
+    const t=document.getElementById('mPortTbl');
+    t.innerHTML='<tr><th>Port</th><th>Ime</th><th>Enable</th></tr>';
+    s.ports.forEach((p,i)=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td><input type="number" class="mp" data-i="${i}" value="${p.port}" min="0" max="65535" style="width:65px"></td><td><input type="text" class="mn" data-i="${i}" value="${p.name}" maxlength="11" style="width:80px"></td><td><input type="checkbox" class="me" data-i="${i}"${p.enabled?' checked':''}></td>`;
+      t.appendChild(tr);
+    });
+    _mL=true;
+  }catch(e){}
+}
+
+// Shrani monitor nastavitve
+async function saveMon(){
+  const ports=[];
+  for(let i=0;i<8;i++){
+    const pp=document.querySelector(`.mp[data-i="${i}"]`);
+    const pn=document.querySelector(`.mn[data-i="${i}"]`);
+    const pe=document.querySelector(`.me[data-i="${i}"]`);
+    if(pp)ports.push({port:parseInt(pp.value)||0,name:pn?pn.value:'',enabled:pe?pe.checked:false});
+  }
+  const b={monitorIp:document.getElementById('mIp').value,wattThreshold:parseFloat(document.getElementById('mWth').value)||3.0,ports};
+  const r=await fetch('/save/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const m=document.getElementById('msgM');
+  m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';
+  setTimeout(()=>m.textContent='',3000);
+}
 
 // Naloži nastavitve ventilatorja za Tab 1
 async function loadFan(){
@@ -752,6 +824,111 @@ void initWebserver() {
             saveSettings();
             // WiFi sprememba velja ob resetu — ne reconnectamo takoj
             LOG_INFO("WEB", "/save/cal OK (WiFi posodobitev ob resetu)");
+            request->send(200, "application/json", "{\"status\":\"OK\"}");
+        }
+    );
+
+    // --- GET /api/monitor → JSON statusov portov in napajanja ---
+    server.on("/api/monitor", HTTP_GET, [](AsyncWebServerRequest *request){
+        MonitorResult res = monitorGetResult();
+
+        portENTER_CRITICAL(&dataMux);
+        PortEntry portsCopy[MONITOR_MAX_PORTS];
+        memcpy(portsCopy, monitorGetPorts(), sizeof(portsCopy));
+        portEXIT_CRITICAL(&dataMux);
+
+        StaticJsonDocument<1024> doc;
+        doc["powered"]    = res.powered;
+        doc["all_ok"]     = res.allPortsOk;
+        doc["port_ok"]    = res.portOkCount;
+        doc["port_total"] = res.portCount;
+        JsonArray arr = doc.createNestedArray("ports");
+        for (int i = 0; i < MONITOR_MAX_PORTS; i++) {
+            if (portsCopy[i].port == 0) continue;
+            JsonObject o = arr.createNestedObject();
+            o["port"]    = portsCopy[i].port;
+            o["name"]    = portsCopy[i].name;
+            o["enabled"] = portsCopy[i].enabled;
+            o["ok"]      = portsCopy[i].lastOk;
+        }
+        String resp;
+        serializeJson(doc, resp);
+        request->send(200, "application/json", resp);
+    });
+
+    // --- GET /api/monitorsettings → za pre-fill Tab 2 ---
+    server.on("/api/monitorsettings", HTTP_GET, [](AsyncWebServerRequest *request){
+        char monIp[16];
+        float wattThr;
+        struct { uint16_t port; char name[12]; bool enabled; } pts[MONITOR_MAX_PORTS];
+
+        portENTER_CRITICAL(&dataMux);
+        memcpy(monIp, settings.monitorIp, sizeof(monIp));
+        wattThr = settings.monitorWattThreshold;
+        for (int i = 0; i < MONITOR_MAX_PORTS; i++) {
+            pts[i].port    = settings.monitorPorts[i].port;
+            memcpy(pts[i].name, settings.monitorPorts[i].name, 12);
+            pts[i].enabled = settings.monitorPorts[i].enabled;
+        }
+        portEXIT_CRITICAL(&dataMux);
+
+        StaticJsonDocument<768> doc;
+        doc["monitorIp"]     = monIp;
+        doc["wattThreshold"] = wattThr;
+        JsonArray arr = doc.createNestedArray("ports");
+        for (int i = 0; i < MONITOR_MAX_PORTS; i++) {
+            JsonObject o = arr.createNestedObject();
+            o["port"]    = pts[i].port;
+            o["name"]    = pts[i].name;
+            o["enabled"] = pts[i].enabled;
+        }
+        String resp;
+        serializeJson(doc, resp);
+        request->send(200, "application/json", resp);
+    });
+
+    // --- POST /save/monitor → shrani monitor nastavitve v NVS ---
+    server.on("/save/monitor", HTTP_POST,
+        [](AsyncWebServerRequest *request){},
+        NULL,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+           size_t index, size_t total){
+            static String body;
+            if (index == 0) body = "";
+            for (size_t i = 0; i < len; i++) body += (char)data[i];
+            if (index + len != total) return;
+
+            StaticJsonDocument<1024> doc;
+            DeserializationError err = deserializeJson(doc, body);
+            if (err) {
+                LOG_ERROR("WEB", "/save/monitor JSON error: %s", err.c_str());
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            if (doc.containsKey("monitorIp")) {
+                const char* v = doc["monitorIp"];
+                if (v) strncpy(settings.monitorIp, v, sizeof(settings.monitorIp) - 1);
+            }
+            if (doc.containsKey("wattThreshold")) {
+                float v = doc["wattThreshold"];
+                if (v >= 0.0f && v <= 100.0f) settings.monitorWattThreshold = v;
+            }
+            JsonArray ports = doc["ports"];
+            if (ports) {
+                int idx = 0;
+                for (JsonObject p : ports) {
+                    if (idx >= MONITOR_MAX_PORTS) break;
+                    settings.monitorPorts[idx].port    = p["port"] | 0;
+                    const char* nm = p["name"] | "";
+                    strncpy(settings.monitorPorts[idx].name, nm,
+                            sizeof(settings.monitorPorts[idx].name) - 1);
+                    settings.monitorPorts[idx].enabled = p["enabled"] | false;
+                    idx++;
+                }
+            }
+            saveSettings();
+            monitorInit();
+            LOG_INFO("WEB", "/save/monitor OK");
             request->send(200, "application/json", "{\"status\":\"OK\"}");
         }
     );

@@ -72,6 +72,34 @@ static void initDefaults() {
     settings.dndMaxPct  = FAN_DND_MAX_PCT;
     settings.fanMinPct  = FAN_MIN_PCT;
 
+    // Mini PC Monitor
+    strncpy(settings.monitorIp, MONITOR_DEFAULT_IP, sizeof(settings.monitorIp) - 1);
+    settings.monitorIp[sizeof(settings.monitorIp) - 1] = '\0';
+    settings.monitorWattThreshold = MONITOR_DEFAULT_WATT_THR;
+
+    static const struct { uint16_t port; const char name[12]; bool enabled; }
+    kPorts[] = {
+        {MONITOR_PORT_0},
+        {MONITOR_PORT_1},
+        {MONITOR_PORT_2},
+        {MONITOR_PORT_3},
+        {MONITOR_PORT_4},
+        {MONITOR_PORT_5},
+        {MONITOR_PORT_6},
+    };
+    constexpr int kPortCount = (int)(sizeof(kPorts) / sizeof(kPorts[0]));
+    for (int i = 0; i < kPortCount && i < MONITOR_MAX_PORTS; i++) {
+        settings.monitorPorts[i].port    = kPorts[i].port;
+        strncpy(settings.monitorPorts[i].name, kPorts[i].name, sizeof(settings.monitorPorts[i].name) - 1);
+        settings.monitorPorts[i].name[sizeof(settings.monitorPorts[i].name) - 1] = '\0';
+        settings.monitorPorts[i].enabled = kPorts[i].enabled;
+    }
+    for (int i = kPortCount; i < MONITOR_MAX_PORTS; i++) {
+        settings.monitorPorts[i].port    = 0;
+        memset(settings.monitorPorts[i].name, 0, sizeof(settings.monitorPorts[i].name));
+        settings.monitorPorts[i].enabled = false;
+    }
+
     Serial.println("[Settings] Privzete vrednosti nastavljene");
 }
 

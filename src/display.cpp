@@ -3,9 +3,11 @@
 #include "config.h"
 #include "globals.h"
 #include "logging.h"
+#include "monitor.h"
 #include <GxEPD2_BW.h>
 #include <U8g2_for_Adafruit_GFX.h>
 #include <SPI.h>
+#include <WiFi.h>
 
 // Font aliasi — tehno stil (_mf: Extended Latin, podpora za °C in Č)
 #define FONT_LABEL  u8g2_font_profont10_mf
@@ -273,6 +275,30 @@ void updateDisplay() {
             u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
             u8g2Fonts.setCursor(watBarX + watBarW + 4, watBarY + watBarH);
             u8g2Fonts.print(buf);
+
+            // --- Monitor ikoni (spodnji levi del cone 3) ---
+            {
+                MonitorResult mon = monitorGetResult();
+                bool wifiOk = (WiFi.status() == WL_CONNECTED);
+                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+
+                // PWR ikona
+                const char* pwrStr;
+                if (inaErr)        pwrStr = "PWR ?";
+                else if (mon.powered) pwrStr = "PWR ON";
+                else               pwrStr = "PWR OF";
+                u8g2Fonts.setCursor(4, 292);
+                u8g2Fonts.print(pwrStr);
+
+                // NET ikona
+                const char* netStr;
+                if (!wifiOk)           netStr = "NET --";
+                else if (mon.allPortsOk)  netStr = "NET OK";
+                else if (mon.anyPortFail) netStr = "NET ER";
+                else                   netStr = "NET --";
+                u8g2Fonts.setCursor(64, 292);
+                u8g2Fonts.print(netStr);
+            }
         }
 
     } while (display.nextPage());

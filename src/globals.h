@@ -53,6 +53,15 @@ struct Settings {
 
     // Ventilator — razširjeno
     uint8_t  fanMaxDayPct;    // Max hitrost podnevi [%], privzeto 100
+
+    // Mini PC Monitor
+    char  monitorIp[16];                // default MONITOR_DEFAULT_IP
+    float monitorWattThreshold;         // default MONITOR_DEFAULT_WATT_THR
+    struct {
+        uint16_t port;
+        char     name[12];
+        bool     enabled;
+    } monitorPorts[MONITOR_MAX_PORTS];
 };
 
 // --- Extern deklaracije ---

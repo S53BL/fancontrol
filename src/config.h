@@ -106,7 +106,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fancontrol"   // http://fancontrol.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "0.6.0"
+#define FW_VERSION          "0.7.0"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -133,3 +133,19 @@ enum ErrorFlag : uint8_t {
 // --- Vremenska ikona skala ---
 #define WX_ICON_SCALE           5           // LilyGo Small=10 za 960px; mi=5 za 128px
 #define WX_ICON_LINESIZE        2           // Debelina črt ikon
+
+// --- Mini PC Monitor ---
+#define MONITOR_TCP_TIMEOUT_MS     500      // TCP connect timeout [ms]
+#define MONITOR_MAX_PORTS          8        // Max portov v nastavitvah
+
+#define MONITOR_DEFAULT_IP         "192.168.2.5"
+#define MONITOR_DEFAULT_WATT_THR   3.0f     // Pod tem = Mini PC izklopljen [W]
+
+// Privzeta lista portov (ime max 11 znakov + null)
+#define MONITOR_PORT_0    80,   "HTTP",    true
+#define MONITOR_PORT_1    443,  "HTTPS",   true
+#define MONITOR_PORT_2    25,   "SMTP",    true
+#define MONITOR_PORT_3    587,  "SMTP-S",  true
+#define MONITOR_PORT_4    465,  "SMTPS",   true
+#define MONITOR_PORT_5    993,  "IMAP-S",  true
+#define MONITOR_PORT_6    8443, "Webmail", true

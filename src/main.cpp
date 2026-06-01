@@ -12,6 +12,7 @@
 #include "display.h"
 #include "webserver.h"
 #include "graph_store.h"
+#include "monitor.h"
 #include <WiFi.h>
 #include <ezTime.h>
 #include "led.h"
@@ -50,6 +51,10 @@ void setup() {
     // 6. Ventilator — PWM init (ne more failati)
     initFan();
     LOG_INFO("BOOT", "Fan PWM init OK");
+
+    // 6b. Monitor init
+    monitorInit();
+    LOG_INFO("BOOT", "Monitor init OK");
 
     // 7. Senzorji — z zamudo za stabilizacijo napajanja
     delay(BOOT_SENSOR_DELAY_MS);
@@ -120,6 +125,7 @@ void loop() {
         pt.fanPct = sensorData.fanPct;
         portEXIT_CRITICAL(&dataMux);
         graphAddPoint(pt);
+        monitorRun();
 
         // Peak temp tracker
         if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
