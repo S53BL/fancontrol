@@ -6,6 +6,7 @@
 #include "globals.h"
 #include "config.h"
 #include "logging.h"
+#include "fan_adapt.h"
 #include "graph_store.h"
 #include "fan.h"
 #include "monitor.h"
@@ -426,12 +427,21 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </div>
 <!-- Temperaturna krivulja -->
 <div class="sec"><h3>Temperaturna krivulja</h3>
-<table class="ctbl" style="margin-bottom:14px"><tr><th>Točka</th><th>Temp [°C]</th><th>Fan [%]</th></tr>
-<tr><td>1</td><td><input type="number" id="ct0" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp0" min="0" max="100" style="width:70px"></td></tr>
-<tr><td>2</td><td><input type="number" id="ct1" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp1" min="0" max="100" style="width:70px"></td></tr>
-<tr><td>3</td><td><input type="number" id="ct2" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp2" min="0" max="100" style="width:70px"></td></tr>
-<tr><td>4</td><td><input type="number" id="ct3" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp3" min="0" max="100" style="width:70px"></td></tr>
-</table></div>
+<table class="ctbl" style="margin-bottom:14px">
+<tr><th>Točka</th><th>Opis</th><th>Temp [°C]</th><th>Fan [%]</th><th>Conf</th><th>Zakleni</th></tr>
+<tr><td>0</td><td style="color:#888;font-size:10px">Mirovanje</td><td><input type="number" id="ct0" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp0" min="0" max="100" style="width:60px"></td><td><span id="cc0" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl0" style="accent-color:#ff9500"></td></tr>
+<tr><td>1</td><td style="color:#888;font-size:10px">Lahka obremenitev</td><td><input type="number" id="ct1" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp1" min="0" max="100" style="width:60px"></td><td><span id="cc1" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl1" style="accent-color:#ff9500"></td></tr>
+<tr><td>2</td><td style="color:#888;font-size:10px">Zmerna obremenitev</td><td><input type="number" id="ct2" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp2" min="0" max="100" style="width:60px"></td><td><span id="cc2" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl2" style="accent-color:#ff9500"></td></tr>
+<tr><td>3</td><td style="color:#888;font-size:10px">Višja obremenitev</td><td><input type="number" id="ct3" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp3" min="0" max="100" style="width:60px"></td><td><span id="cc3" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl3" style="accent-color:#ff9500"></td></tr>
+<tr><td>4</td><td style="color:#888;font-size:10px">Visoka obremenitev</td><td><input type="number" id="ct4" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp4" min="0" max="100" style="width:60px"></td><td><span id="cc4" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl4" style="accent-color:#ff9500"></td></tr>
+<tr><td>5</td><td style="color:#888;font-size:10px">Maksimum / zaščita</td><td><input type="number" id="ct5" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp5" min="0" max="100" style="width:60px"></td><td><span id="cc5" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl5" style="accent-color:#ff9500"></td></tr>
+</table>
+<div style="margin-bottom:12px;font-size:10px;color:#555">
+  Confidence: število ravnovesnih opazovanj (prag za aktivacijo: 20).
+  Zaklenjene točke algoritem ne posodablja.
+  <button class="btn bsm bto" onclick="adaptReset()" style="margin-left:12px">Reset učenja</button>
+</div>
+</div>
 <!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
 <div class="fr"><label>Min hitrost [%]</label><input type="number" id="fMin" min="0" max="100" style="width:70px"></div>
@@ -655,7 +665,18 @@ setInterval(refreshMonitor,30000);refreshMonitor();
 async function loadFan(){
   try{
     const s=await(await fetch('/api/fansettings')).json();
-    for(let i=0;i<4;i++){document.getElementById('ct'+i).value=s.curveTemp[i];document.getElementById('cp'+i).value=s.curvePct[i];}
+    for(let i=0;i<6;i++){
+      document.getElementById('ct'+i).value=s.curveTemp[i];
+      document.getElementById('cp'+i).value=s.curvePct[i];
+      if(s.curveLocked)document.getElementById('cl'+i).checked=s.curveLocked[i];
+      if(s.curveConfidence){
+        const conf=s.curveConfidence[i];
+        const thresh=s.adaptThresh||20;
+        const el=document.getElementById('cc'+i);
+        el.textContent=conf+'/'+thresh;
+        el.style.color=conf>=thresh?'#30d158':'#555';
+      }
+    }
     document.getElementById('fMin').value=s.fanMinPct;
     document.getElementById('fMaxD').value=s.fanMaxDayPct;
     document.getElementById('fDndM').value=s.dndMaxPct;
@@ -667,11 +688,20 @@ async function loadFan(){
   }catch(e){}
 }
 async function saveFan(){
-  const ct=[0,1,2,3].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
-  const cp=[0,1,2,3].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
-  const b={curveTemp:ct,curvePct:cp,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7};
+  const ct=[0,1,2,3,4,5].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
+  const cp=[0,1,2,3,4,5].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
+  const cl=[0,1,2,3,4,5].map(i=>document.getElementById('cl'+i).checked);
+  const b={curveTemp:ct,curvePct:cp,curveLocked:cl,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7};
   const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const m=document.getElementById('msgF');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+}
+async function adaptReset(){
+  if(!confirm('Ponastavi vse naučene vrednosti na default? Zaklepi ostanejo.'))return;
+  const r=await fetch('/adapt/reset',{method:'POST'});
+  const m=document.getElementById('msgF');
+  m.textContent=r.ok?'Ucenje ponastavljeno — default vrednosti aktivne':'Napaka!';
+  m.style.color=r.ok?'#ff9500':'#ff3b30';
+  setTimeout(()=>{m.textContent='';loadFan();},3000);
 }
 
 // ── Kalibracija ────────────────────────────────────────────────────
@@ -1060,12 +1090,16 @@ void initWebserver() {
 
     // --- GET /api/fansettings → za pre-fill Tab 1 ---
     server.on("/api/fansettings", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<512> doc;
-        JsonArray ct = doc.createNestedArray("curveTemp");
-        JsonArray cp = doc.createNestedArray("curvePct");
+        StaticJsonDocument<768> doc;
+        JsonArray ct     = doc.createNestedArray("curveTemp");
+        JsonArray cp     = doc.createNestedArray("curvePct");
+        JsonArray locked = doc.createNestedArray("curveLocked");
+        JsonArray conf   = doc.createNestedArray("curveConfidence");
         for (int i = 0; i < FAN_CURVE_POINTS; i++) {
             ct.add(settings.curveTemp[i]);
             cp.add(settings.curvePct[i]);
+            locked.add(settings.curveLocked[i]);
+            conf.add(settings.curveConfidence[i]);
         }
         doc["fanMinPct"]    = settings.fanMinPct;
         doc["fanMaxDayPct"] = settings.fanMaxDayPct;
@@ -1073,6 +1107,7 @@ void initWebserver() {
         doc["dndEnabled"]   = settings.dndEnabled;
         doc["dndFrom"]      = settings.dndFrom;
         doc["dndTo"]        = settings.dndTo;
+        doc["adaptThresh"]  = ADAPT_CONFIDENCE_THRESH;
         String resp;
         serializeJson(doc, resp);
         request->send(200, "application/json", resp);
@@ -1110,7 +1145,7 @@ void initWebserver() {
             _fanBodyLen += copyLen;
             if (index + len != total) return;
 
-            StaticJsonDocument<512> doc;
+            StaticJsonDocument<768> doc;
             DeserializationError err = deserializeJson(doc, _fanBodyBuf);
             if (err) {
                 LOG_ERROR("WEB", "/save/fan JSON error: %s", err.c_str());
@@ -1127,6 +1162,13 @@ void initWebserver() {
                     uint8_t p = cp[i];
                     if (t >= 0.0f && t <= 80.0f) settings.curveTemp[i] = t;
                     if (p <= 100) settings.curvePct[i] = p;
+                }
+            }
+            // Zaklep točk
+            JsonArray lk = doc["curveLocked"];
+            if (lk && lk.size() == FAN_CURVE_POINTS) {
+                for (int i = 0; i < FAN_CURVE_POINTS; i++) {
+                    settings.curveLocked[i] = lk[i];
                 }
             }
             if (doc.containsKey("fanMinPct")) {
@@ -1156,6 +1198,13 @@ void initWebserver() {
             request->send(200, "application/json", "{\"status\":\"OK\"}");
         }
     );
+
+    // --- POST /adapt/reset → reset učenja na default ---
+    server.on("/adapt/reset", HTTP_POST, [](AsyncWebServerRequest *request){
+        adaptReset();
+        LOG_INFO("WEB", "/adapt/reset — ucenje ponastavljeno");
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
 
     // --- POST /save/cal → shrani kalibracija + WiFi v NVS ---
     server.on("/save/cal", HTTP_POST,

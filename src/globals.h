@@ -36,9 +36,13 @@ struct Settings {
     // WiFi
     char     ssid[32];
     char     password[64];
-    // Temperaturna krivulja (4 točke)
+    // Temperaturna krivulja (6 točk)
     float    curveTemp[FAN_CURVE_POINTS];
     uint8_t  curvePct[FAN_CURVE_POINTS];
+    // Adaptivna krivulja — zaklep posameznih točk
+    bool     curveLocked[FAN_CURVE_POINTS];
+    // Adaptivni confidence — koliko ravnovesnih opazovanj podpira vsako točko
+    uint8_t  curveConfidence[FAN_CURVE_POINTS];
     // DND
     bool     dndEnabled;
     uint8_t  dndFrom;   // ura 0–23
@@ -70,9 +74,21 @@ struct Settings {
     bool    ledEnabled;         // RGB LED omogočena (false = LED nikoli ne sveti)
 };
 
+// --- Adaptivni opazovalec (runtime, ne shranjevati v NVS) ---
+struct AdaptObserver {
+    float    tempHistory[90];
+    uint8_t  fanHistory[90];
+    uint8_t  histIdx;
+    uint8_t  histCount;
+    bool     equilibriumActive;
+    uint32_t equilibriumStartMs;
+    uint32_t lastUpdateMs;
+};
+
 // --- Extern deklaracije ---
-extern SensorData sensorData;
-extern Settings   settings;
+extern SensorData    sensorData;
+extern Settings      settings;
+extern AdaptObserver adaptObserver;
 extern Timezone   myTZ;
 extern bool       timeSynced;
 extern bool       newSensorData;

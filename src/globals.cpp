@@ -3,8 +3,9 @@
 #include "globals.h"
 
 // --- Senzorski podatki in nastavitve ---
-SensorData sensorData;
-Settings   settings;
+SensorData   sensorData;
+Settings     settings;
+AdaptObserver adaptObserver = {};
 
 // --- ezTime: timezone objekt ---
 Timezone myTZ;
@@ -50,15 +51,16 @@ static void initDefaults() {
     memset(settings.ssid,     0, sizeof(settings.ssid));
     memset(settings.password, 0, sizeof(settings.password));
 
-    settings.curveTemp[0] = FAN_CURVE_TEMP_0;
-    settings.curveTemp[1] = FAN_CURVE_TEMP_1;
-    settings.curveTemp[2] = FAN_CURVE_TEMP_2;
-    settings.curveTemp[3] = FAN_CURVE_TEMP_3;
-
-    settings.curvePct[0]  = FAN_CURVE_PCT_0;
-    settings.curvePct[1]  = FAN_CURVE_PCT_1;
-    settings.curvePct[2]  = FAN_CURVE_PCT_2;
-    settings.curvePct[3]  = FAN_CURVE_PCT_3;
+    settings.curveTemp[0] = FAN_CURVE_TEMP_0;  settings.curvePct[0] = FAN_CURVE_PCT_0;
+    settings.curveTemp[1] = FAN_CURVE_TEMP_1;  settings.curvePct[1] = FAN_CURVE_PCT_1;
+    settings.curveTemp[2] = FAN_CURVE_TEMP_2;  settings.curvePct[2] = FAN_CURVE_PCT_2;
+    settings.curveTemp[3] = FAN_CURVE_TEMP_3;  settings.curvePct[3] = FAN_CURVE_PCT_3;
+    settings.curveTemp[4] = FAN_CURVE_TEMP_4;  settings.curvePct[4] = FAN_CURVE_PCT_4;
+    settings.curveTemp[5] = FAN_CURVE_TEMP_5;  settings.curvePct[5] = FAN_CURVE_PCT_5;
+    for (int i = 0; i < FAN_CURVE_POINTS; i++) {
+        settings.curveLocked[i]     = false;
+        settings.curveConfidence[i] = 0;
+    }
 
     settings.tempOffset   = 0.0f;
     settings.humOffset    = 0.0f;

@@ -2,6 +2,7 @@
 #include "fan.h"
 #include "globals.h"
 #include "logging.h"
+#include "fan_adapt.h"
 #include <Arduino.h>
 
 static uint8_t _fanPct = 0;
@@ -116,6 +117,8 @@ void updateFan() {
     setFanPct(pct);
     LOG_INFO("FAN", "T=%.1f C -> %d%% DND=%s",
              temp, pct, sensorData.dndActive ? "ON" : "off");
+
+    adaptUpdate(temp, pct);
 }
 
 // --- Ročni način ---

@@ -13,6 +13,7 @@
 #include "webserver.h"
 #include "graph_store.h"
 #include "monitor.h"
+#include "fan_adapt.h"
 #include <WiFi.h>
 #include <ezTime.h>
 #include "led.h"
@@ -52,6 +53,8 @@ void setup() {
     // 6. Ventilator — PWM init (ne more failati)
     initFan();
     LOG_INFO("BOOT", "Fan PWM init OK");
+    adaptInit();
+    LOG_INFO("BOOT", "Adapt fan init OK");
 
     // 6b. Monitor init
     monitorInit();

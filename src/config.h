@@ -38,17 +38,29 @@
 #define FAN_PWM_MIN         0       // 0% (ventilator izklopljen)
 #define FAN_PWM_MAX         255     // 100%
 
-// --- Temperaturna krivulja (privzeto, nastavljivo v web vmesniku) ---
-#define FAN_CURVE_POINTS    4
-// Temp [°C] : pod to temp → ta % PWM
-#define FAN_CURVE_TEMP_0    35.0f
-#define FAN_CURVE_TEMP_1    45.0f
-#define FAN_CURVE_TEMP_2    55.0f
-#define FAN_CURVE_TEMP_3    60.0f
-#define FAN_CURVE_PCT_0     20      // %
-#define FAN_CURVE_PCT_1     50
-#define FAN_CURVE_PCT_2     80
-#define FAN_CURVE_PCT_3     100
+// --- Temperaturna krivulja (6 točk, privzeto) ---
+#define FAN_CURVE_POINTS    6
+#define FAN_CURVE_TEMP_0    30.0f
+#define FAN_CURVE_TEMP_1    38.0f
+#define FAN_CURVE_TEMP_2    45.0f
+#define FAN_CURVE_TEMP_3    52.0f
+#define FAN_CURVE_TEMP_4    58.0f
+#define FAN_CURVE_TEMP_5    65.0f
+#define FAN_CURVE_PCT_0     15
+#define FAN_CURVE_PCT_1     25
+#define FAN_CURVE_PCT_2     45
+#define FAN_CURVE_PCT_3     65
+#define FAN_CURVE_PCT_4     85
+#define FAN_CURVE_PCT_5     100
+
+// --- Adaptivni fan control ---
+#define ADAPT_EMA_ALPHA             0.08f
+#define ADAPT_CONFIDENCE_THRESH     20
+#define ADAPT_CONFIDENCE_MAX        100
+#define ADAPT_EQUILIBRIUM_WINDOW    90
+#define ADAPT_TEMP_STABILITY        1.0f
+#define ADAPT_MIN_EQUILIBRIUM_MS    600000UL
+#define ADAPT_NVS_NAMESPACE         "fanadapt"
 
 // --- DND (nočni tihi način) ---
 #define FAN_DND_MAX_PCT     30      // Max % med DND
@@ -102,7 +114,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "0.9.4"
+#define FW_VERSION          "0.9.7"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
