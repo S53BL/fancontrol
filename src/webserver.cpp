@@ -9,6 +9,7 @@
 #include "graph_store.h"
 #include "fan.h"
 #include "monitor.h"
+#include "led.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -329,6 +330,20 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 .eb{display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px}
 .eok{background:#0a2a0a;color:#30d158}.efail{background:#2a0a0a;color:#ff3b30}
 .ctbl td,th{min-width:60px}
+/* Toggle switch */
+.tgsw{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+.tgsw input{opacity:0;width:0;height:0}
+.tgtr{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#2a2a2a;border-radius:24px;transition:.3s}
+.tgkn{position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#555;border-radius:50%;transition:.3s}
+/* Sistem 2-kolona */
+.sys2{display:flex;gap:12px;align-items:flex-start}
+.sys2 .slog{flex:1.4;min-width:0}
+.sys2 .sinf{flex:1;min-width:200px}
+@media(max-width:600px){.sys2{flex-direction:column}}
+.logbox{height:400px;overflow-y:auto;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:4px;margin-top:8px}
+.logbox table{width:100%}
+.logflt{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.logflt label{font-size:11px;color:#aaa;display:flex;align-items:center;gap:4px;cursor:pointer}
 </style></head><body>
 <header>
 <div><h1>&#9650; FANCONTROL</h1></div>
@@ -345,7 +360,8 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="t" onclick="sw(3)">SISTEM</div>
 </nav>
 <main>
-<!-- TAB 0: DASHBOARD -->
+
+<!-- ═══════════════════════════════════════════════════ TAB 0: DASHBOARD -->
 <div class="pane on" id="p0">
 <div class="cards">
 <div class="card"><div class="ctit">Temperatura</div><div><span class="cval" id="ct">--</span><span class="cunit"> °C</span></div><div class="cpeak" id="pkt"></div></div>
@@ -356,10 +372,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="card"><div class="ctit">&#9889; Napajanje</div><div class="cval" id="mpwr" style="font-size:20px">--</div></div>
 <div class="card"><div class="ctit">&#127760; Servisi</div><div><span class="cval" id="msvc" style="font-size:20px">--</span></div><div class="cpeak" id="msvd"></div></div>
 </div>
-<div id="monBox" class="cw" style="display:none">
-<div class="ct2">Mini PC Servisi</div>
-<table id="monTbl"><tr><th>Port</th><th>Servis</th><th>Status</th></tr></table>
-</div>
+<!-- Graf — PRED servisi -->
 <div class="cw">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <div class="ct2" style="margin:0">GRAF ZGODOVINE</div>
@@ -377,9 +390,41 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
   </div>
   <div id="uplotWrap" style="width:100%"></div>
 </div>
+<!-- Servisi — POD grafom -->
+<div id="monBox" class="cw" style="display:none">
+<div class="ct2">Server Servisi</div>
+<table id="monTbl"><tr><th>Port</th><th>Servis</th><th>Status</th></tr></table>
 </div>
-<!-- TAB 1: VENTILATOR -->
+</div>
+
+<!-- ═══════════════════════════════════════════════════ TAB 1: VENTILATOR -->
 <div class="pane" id="p1">
+<!-- Ročno upravljanje — PRVI blok -->
+<div class="sec"><h3>Ročno upravljanje</h3>
+<div class="fr" style="margin-bottom:14px">
+  <label style="min-width:170px">Način</label>
+  <div style="display:flex;align-items:center;gap:10px;max-width:280px">
+    <span id="modeLabel" style="font-size:12px;color:#aaa;min-width:90px">AVTOMATSKO</span>
+    <label class="tgsw">
+      <input type="checkbox" id="manToggle" onchange="onManToggle()">
+      <span class="tgtr" id="manSliderToggle"><span class="tgkn" id="manKnob"></span></span>
+    </label>
+  </div>
+</div>
+<div id="manSliderWrap" style="display:none;margin-bottom:10px">
+  <div class="fr">
+    <label style="min-width:170px">Hitrost [%]</label>
+    <div style="display:flex;align-items:center;gap:10px;max-width:280px;flex:1">
+      <input type="range" id="manPct" min="0" max="100" value="0"
+             style="flex:1;accent-color:#00d4ff" oninput="onManSlider()">
+      <span id="manPctVal" style="color:#00d4ff;font-size:14px;min-width:36px;text-align:right">0%</span>
+    </div>
+  </div>
+</div>
+<button class="btn" id="manApplyBtn" style="display:none" onclick="applyManual()">Nastavi</button>
+<span class="msg" id="msgMan"></span>
+</div>
+<!-- Temperaturna krivulja -->
 <div class="sec"><h3>Temperaturna krivulja</h3>
 <table class="ctbl" style="margin-bottom:14px"><tr><th>Točka</th><th>Temp [°C]</th><th>Fan [%]</th></tr>
 <tr><td>1</td><td><input type="number" id="ct0" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp0" min="0" max="100" style="width:70px"></td></tr>
@@ -387,6 +432,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <tr><td>3</td><td><input type="number" id="ct2" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp2" min="0" max="100" style="width:70px"></td></tr>
 <tr><td>4</td><td><input type="number" id="ct3" min="0" max="80" step="0.5" style="width:80px"></td><td><input type="number" id="cp3" min="0" max="100" style="width:70px"></td></tr>
 </table></div>
+<!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
 <div class="fr"><label>Min hitrost [%]</label><input type="number" id="fMin" min="0" max="100" style="width:70px"></div>
 <div class="fr"><label>Max podnevi [%]</label><input type="number" id="fMaxD" min="0" max="100" style="width:70px"></div>
@@ -396,33 +442,9 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>DND do ure (0–23)</label><input type="number" id="dndT" min="0" max="23" style="width:70px"></div>
 <button class="btn" onclick="saveFan()">Shrani</button><span class="msg" id="msgF"></span>
 </div>
-<div class="sec"><h3>Ročno upravljanje</h3>
-<div class="fr" style="margin-bottom:14px">
-  <label style="min-width:170px">Način</label>
-  <div style="display:flex;align-items:center;gap:10px">
-    <span id="modeLabel" style="font-size:12px;color:#aaa;min-width:80px">AVTOMATSKO</span>
-    <label style="position:relative;display:inline-block;width:44px;height:24px">
-      <input type="checkbox" id="manToggle" style="opacity:0;width:0;height:0" onchange="onManToggle()">
-      <span id="manSliderToggle" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#2a2a2a;border-radius:24px;transition:.3s">
-        <span id="manKnob" style="position:absolute;content:'';height:18px;width:18px;left:3px;bottom:3px;background:#555;border-radius:50%;transition:.3s"></span>
-      </span>
-    </label>
-  </div>
 </div>
-<div id="manSliderWrap" style="display:none;margin-bottom:10px">
-  <div class="fr">
-    <label style="min-width:170px">Hitrost [%]</label>
-    <div style="display:flex;align-items:center;gap:10px;flex:1">
-      <input type="range" id="manPct" min="0" max="100" value="0"
-             style="flex:1;accent-color:#00d4ff" oninput="onManSlider()">
-      <span id="manPctVal" style="color:#00d4ff;font-size:14px;min-width:36px;text-align:right">0%</span>
-    </div>
-  </div>
-</div>
-<button class="btn" id="manApplyBtn" style="display:none" onclick="applyManual()">Nastavi</button>
-<span class="msg" id="msgMan"></span>
-</div></div>
-<!-- TAB 2: KALIBRACIJA -->
+
+<!-- ═══════════════════════════════════════════════════ TAB 2: KALIBRACIJA -->
 <div class="pane" id="p2">
 <div class="sec"><h3>SHT30 Kalibracija</h3>
 <div class="fr"><label>Temp offset [°C]</label><input type="number" id="tOff" step="0.1"></div>
@@ -437,294 +459,183 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>Geslo</label><input type="password" id="wPass" maxlength="63" style="width:200px"></div>
 <button class="btn" onclick="saveCal()">Shrani</button><span class="msg" id="msgC"></span>
 </div>
-<div class="sec"><h3>Mini PC Monitor</h3>
+<!-- Server Monitor -->
+<div class="sec"><h3>Server Monitor</h3>
 <div class="fr"><label>IP naslov</label><input type="text" id="mIp" maxlength="15" style="width:140px"></div>
 <div class="fr"><label>Prag porabe [W]</label><input type="number" id="mWth" step="0.1" min="0" style="width:80px"></div>
 <div style="overflow-x:auto;margin:10px 0">
 <table id="mPortTbl"><tr><th>Port</th><th>Ime</th><th>Enable</th></tr></table>
 </div>
 <button class="btn" onclick="saveMon()">Shrani monitor</button><span class="msg" id="msgM"></span>
-</div></div>
-<!-- TAB 3: SISTEM -->
+</div>
+<!-- LED stikalo -->
+<div class="sec"><h3>RGB LED</h3>
+<div class="fr">
+  <label style="min-width:170px">LED statusna lučka</label>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span id="ledLabel" style="font-size:12px;color:#aaa;min-width:70px">--</span>
+    <label class="tgsw">
+      <input type="checkbox" id="ledToggle" onchange="onLedToggle()">
+      <span class="tgtr" id="ledTrack"><span class="tgkn" id="ledKnob"></span></span>
+    </label>
+  </div>
+</div>
+<span class="msg" id="msgLed"></span>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ TAB 3: SISTEM -->
 <div class="pane" id="p3">
-<div class="sec"><h3>Sistemske informacije</h3><div id="sysinfo"></div></div>
-<div class="sec">
-<h3>RAM Log &nbsp;<button class="btn bsm" onclick="fetchLog()">Osveži</button>&nbsp;<button class="btn bsm bto" onclick="clearLog()">Počisti</button>&nbsp;<a class="btn bsm" href="/api/log/download" download style="text-decoration:none">Download</a></h3>
-<div style="overflow-x:auto;margin-top:10px">
-<table id="logtbl"><tr><th>Čas</th><th>Level</th><th>Tag</th><th>Sporočilo</th></tr></table>
-</div></div>
-<div class="sec"><h3>OTA Firmware Update</h3>
-<form id="otaF">
-<input type="file" id="otaBin" accept=".bin" required style="display:block;width:100%;padding:8px;margin:8px 0 12px;background:#0d0d0d;border:2px dashed #333;border-radius:6px;color:#e0e0e0;cursor:pointer">
-<button class="btn" type="submit">Naloži firmware</button>
-</form>
-<div id="otaPrg" style="display:none;width:100%;background:#2a2a2a;border-radius:4px;height:12px;margin-top:10px;overflow:hidden">
-<div id="otaBar" style="height:100%;background:#00d4ff;width:0;transition:width 0.3s;border-radius:4px"></div></div>
-<div id="otaSt" style="margin-top:8px;font-size:12px;color:#00d4ff"></div>
-</div></div>
+<div class="sys2">
+  <!-- LEVO: RAM Log -->
+  <div class="slog">
+    <div class="sec" style="height:100%">
+      <h3>RAM Log
+        &nbsp;<button class="btn bsm" onclick="fetchLog()">Osveži</button>
+        &nbsp;<button class="btn bsm bto" onclick="clearLog()">Počisti</button>
+        &nbsp;<a class="btn bsm" href="/api/log/download" download style="text-decoration:none">Download</a>
+      </h3>
+      <div class="logflt">
+        <label><input type="checkbox" id="fInfo" checked onchange="applyLogFilter()"> <span style="color:#888">INFO</span></label>
+        <label><input type="checkbox" id="fWarn" checked onchange="applyLogFilter()"> <span style="color:#ff9500">WARN</span></label>
+        <label><input type="checkbox" id="fErr"  checked onchange="applyLogFilter()"> <span style="color:#ff3b30">ERROR</span></label>
+      </div>
+      <div class="logbox" id="logbox">
+        <table id="logtbl"><tr><th>Čas</th><th>Lvl</th><th>Tag</th><th>Sporočilo</th></tr></table>
+      </div>
+    </div>
+  </div>
+  <!-- DESNO: Sistemske informacije -->
+  <div class="sinf">
+    <div class="sec">
+      <h3>Sistem</h3>
+      <div id="sysinfo"></div>
+    </div>
+    <!-- OTA -->
+    <div class="sec" style="margin-top:12px">
+      <h3>OTA Update</h3>
+      <form id="otaF">
+      <input type="file" id="otaBin" accept=".bin" required style="display:block;width:100%;padding:8px;margin:8px 0 12px;background:#0d0d0d;border:2px dashed #333;border-radius:6px;color:#e0e0e0;cursor:pointer">
+      <button class="btn" type="submit">Naloži firmware</button>
+      </form>
+      <div id="otaPrg" style="display:none;width:100%;background:#2a2a2a;border-radius:4px;height:12px;margin-top:10px;overflow:hidden">
+      <div id="otaBar" style="height:100%;background:#00d4ff;width:0;transition:width 0.3s;border-radius:4px"></div></div>
+      <div id="otaSt" style="margin-top:8px;font-size:12px;color:#00d4ff"></div>
+    </div>
+  </div>
+</div>
+</div>
+
 </main>
 <link rel="stylesheet" href="/uplot.css">
 <script src="/uplot.js"></script>
 <script>
-// Tab switching
+// ── Tab switching ──────────────────────────────────────────────────
 let atab=0,_fL=false,_cL=false,_mL=false;
 function sw(i){
   document.querySelectorAll('.t').forEach((e,n)=>e.classList.toggle('on',n===i));
   document.querySelectorAll('.pane').forEach((e,n)=>e.classList.toggle('on',n===i));
   atab=i;
-  if(i===0 && !_uplot && _rawData) initUplot(_rawData);
-  if(i===0) loadHistory();
+  if(i===0&&!_uplot&&_rawData)initUplot(_rawData);
+  if(i===0)loadHistory();
   if(i===1&&!_fL)loadFan();
   if(i===2&&!_cL)loadCal();
   if(i===2&&!_mL)loadMon();
+  if(i===2)loadLed();
   if(i===3){fetchSys();fetchLog();}
 }
 
 function fUp(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return(h?h+'h ':'')+m+'m '+sec+'s';}
+function fBytes(b){if(b>=1048576)return(b/1048576).toFixed(1)+' MB';if(b>=1024)return(b/1024).toFixed(0)+' KB';return b+' B';}
+function fPct(free,total){return total>0?Math.round(free/total*100)+'%':'--';}
 
-// Osveži kartice in grafe iz /api/data in /api/history
+// ── Autorefresh 5s ─────────────────────────────────────────────────
 async function refreshData(){
   try{
     const d=await(await fetch('/api/data')).json();
     document.getElementById('hip').textContent=d.ip;
     document.getElementById('hup').textContent=fUp(d.uptime);
     document.getElementById('htim').textContent=d.time;
-    document.getElementById('ct').textContent=d.temp.toFixed(1);
-    document.getElementById('ch').textContent=d.hum.toFixed(1);
-    document.getElementById('cv').textContent=d.volt.toFixed(2);
-    document.getElementById('cw').textContent=d.watt.toFixed(1);
+    document.getElementById('ct').textContent=d.temp;
+    document.getElementById('ch').textContent=d.hum;
+    document.getElementById('cv').textContent=d.volt;
+    document.getElementById('cw').textContent=d.watt;
     document.getElementById('cf').textContent=d.fan;
     document.getElementById('cdnd').textContent=d.dnd?'DND aktiven':'';
     document.getElementById('cman').textContent=d.manual?'ROČNO':'';
-    // Sinhronizacija sliderja če je tab 1 odprt
     if(atab===1){
       const tog=document.getElementById('manToggle');
-      if(tog&&!tog.dataset.userEditing){
-        tog.checked=d.manual;
-        updateManUI(d.manual,d.manual_pct);
-      }
+      if(tog&&!tog.dataset.userEditing){tog.checked=d.manual;updateManUI(d.manual,d.manual_pct);}
     }
-    document.getElementById('pkt').textContent=d.peak_temp>-900?'Peak: '+d.peak_temp.toFixed(1)+' °C':'';
-    document.getElementById('pkw').textContent=d.peak_watt>0?'Peak: '+d.peak_watt.toFixed(1)+' W':'';
+    document.getElementById('pkt').textContent=d.peak_temp>-900?'Peak: '+d.peak_temp+' °C':'';
+    document.getElementById('pkw').textContent=d.peak_watt>0?'Peak: '+d.peak_watt+' W':'';
     if(atab===0)loadHistory();
+    // Sistemske info v Tab 3
+    if(atab===3)buildSysInfo(d);
   }catch(e){}
 }
-
-// ── uPlot graf ─────────────────────────────────────────────────────
-const COLORS = {
-  temp: '#e05252',
-  hum:  '#5b9bd5',
-  fan:  '#4ec9b0',
-  watt: '#d4a76a',
-  grid: getComputedStyle(document.documentElement)
-          .getPropertyValue('--color-border-tertiary').trim() || '#2a2a2a',
-  text: getComputedStyle(document.documentElement)
-          .getPropertyValue('--color-text-secondary').trim() || '#888',
-};
-
-let _uplot = null;
-let _rawData = null;
-let _zoomed  = false;
-
-function buildSeries() {
-  const cbT = document.getElementById('cbTemp').checked;
-  const cbH = document.getElementById('cbHum').checked;
-  const cbF = document.getElementById('cbFan').checked;
-  const cbW = document.getElementById('cbWatt').checked;
-
-  const series = [{}];
-  if (cbT) series.push({ label:'Temp °C', stroke:COLORS.temp, width:1.5,
-    fill:COLORS.temp+'18', scale:'temp',
-    value:(u,v)=>v==null?'--':v.toFixed(1)+' °C' });
-  if (cbH) series.push({ label:'Vlaga %', stroke:COLORS.hum,  width:1.5,
-    scale:'hum',
-    value:(u,v)=>v==null?'--':v.toFixed(0)+' %' });
-  if (cbF) series.push({ label:'Fan %',   stroke:COLORS.fan,  width:1.5,
-    scale:'fan',
-    value:(u,v)=>v==null?'--':v.toFixed(0)+' %' });
-  if (cbW) series.push({ label:'Watt',    stroke:COLORS.watt, width:1.5,
-    scale:'watt',
-    value:(u,v)=>v==null?'--':v.toFixed(1)+' W' });
-  return series;
-}
-
-function buildAxes() {
-  const cbT = document.getElementById('cbTemp').checked;
-  const cbH = document.getElementById('cbHum').checked;
-  const cbF = document.getElementById('cbFan').checked;
-  const cbW = document.getElementById('cbWatt').checked;
-  const axStyle = { stroke:COLORS.text, grid:{stroke:COLORS.grid,width:0.5},
-                    ticks:{show:false}, font:'10px monospace' };
-
-  const axes = [{
-    ...axStyle,
-    values:(u,vs)=>vs.map(v=>{
-      if(v==null)return'';
-      const d=new Date(v*1000);
-      return d.getHours().toString().padStart(2,'0')+':'+
-             d.getMinutes().toString().padStart(2,'0');
-    }),
-  }];
-
-  let leftDone = false;
-  if (cbT) { axes.push({...axStyle,scale:'temp',stroke:COLORS.temp,
-    label:'°C',size:42,side:leftDone?1:3}); if(!leftDone)leftDone=true; }
-  if (cbH) { axes.push({...axStyle,scale:'hum', stroke:COLORS.hum,
-    label:'%', size:42,side:leftDone?1:3,grid:{show:false}}); if(!leftDone)leftDone=true; }
-  if (cbF) { axes.push({...axStyle,scale:'fan', stroke:COLORS.fan,
-    label:'Fan%',size:48,side:1,grid:{show:false}}); }
-  if (cbW) { axes.push({...axStyle,scale:'watt',stroke:COLORS.watt,
-    label:'W',  size:42,side:1,grid:{show:false}}); }
-  return axes;
-}
-
-function buildScales() {
-  return {
-    x:    {},
-    temp: { range:(u,mn,mx)=>[mn-1, mx+1] },
-    hum:  { range:(u,mn,mx)=>[Math.max(0,mn-3), Math.min(100,mx+3)] },
-    fan:  { range:(u,mn,mx)=>[Math.max(0,mn-3), Math.min(100,mx+3)] },
-    watt: { range:(u,mn,mx)=>[Math.max(0,mn-0.5), mx+0.5] },
-  };
-}
-
-function buildData(raw) {
-  if (!raw) return [[]];
-  const cbT = document.getElementById('cbTemp').checked;
-  const cbH = document.getElementById('cbHum').checked;
-  const cbF = document.getElementById('cbFan').checked;
-  const cbW = document.getElementById('cbWatt').checked;
-  const out = [raw[0]];
-  if (cbT) out.push(raw[1]);
-  if (cbH) out.push(raw[2]);
-  if (cbF) out.push(raw[3]);
-  if (cbW) out.push(raw[4]);
-  return out;
-}
-
-function getPlotWidth() {
-  const wrap = document.getElementById('uplotWrap');
-  return wrap ? Math.max(300, wrap.clientWidth) : 600;
-}
-
-function initUplot(raw) {
-  _rawData = raw;
-  const wrap = document.getElementById('uplotWrap');
-  if (!wrap) return;
-  wrap.innerHTML = '';
-
-  const hasSeries = ['cbTemp','cbHum','cbFan','cbWatt']
-    .some(id => document.getElementById(id).checked);
-  if (!hasSeries) {
-    wrap.innerHTML = '<div style="text-align:center;color:#555;padding:40px;font-size:12px">Izberi vsaj en podatek</div>';
-    return;
-  }
-
-  const opts = {
-    width:  getPlotWidth(),
-    height: 220,
-    cursor: {
-      sync: { key: 'main' },
-      drag: { x: true, y: false, setScale: false },
-    },
-    select: { show: true },
-    legend: {
-      show: true,
-      live: true,
-      markers: { show: true },
-    },
-    axes:   buildAxes(),
-    scales: buildScales(),
-    series: buildSeries(),
-    hooks: {
-      setSelect: [u => {
-        const sel = u.select;
-        if (sel.width > 10) {
-          const xMin = u.posToVal(sel.left, 'x');
-          const xMax = u.posToVal(sel.left + sel.width, 'x');
-          u.setScale('x', { min: xMin, max: xMax });
-          u.setSelect({ left:0, top:0, width:0, height:0 }, false);
-          _zoomed = true;
-          const btn = document.getElementById('zoomReset');
-          if (btn) btn.style.display = '';
-        }
-      }],
-      dblclick: [u => { resetZoom(); }],
-    },
-  };
-
-  _uplot = new uPlot(opts, buildData(raw), wrap);
-}
-
-function resetZoom() {
-  if (!_uplot || !_rawData) return;
-  _uplot.setScale('x', { min: _rawData[0][0], max: _rawData[0][_rawData[0].length-1] });
-  _zoomed = false;
-  const btn = document.getElementById('zoomReset');
-  if (btn) btn.style.display = 'none';
-}
-
-function rebuildUplot() {
-  if (_rawData) initUplot(_rawData);
-}
-
-['cbTemp','cbHum','cbFan','cbWatt'].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener('change', rebuildUplot);
-});
-
-let _resizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(() => {
-    if (_uplot) _uplot.setSize({ width: getPlotWidth(), height: 220 });
-  }, 150);
-});
-
-async function loadHistory() {
-  try {
-    const pts = await (await fetch('/api/history')).json();
-    if (!pts || pts.length === 0) return;
-
-    const n    = pts.length;
-    const xs   = new Float64Array(n);
-    const temp = new Float64Array(n);
-    const hum  = new Float64Array(n);
-    const fan  = new Float64Array(n);
-    const watt = new Float64Array(n);
-
-    for (let i = 0; i < n; i++) {
-      xs[i]   = pts[i].ts;
-      temp[i] = pts[i].temp;
-      hum[i]  = pts[i].hum;
-      fan[i]  = pts[i].fan;
-      watt[i] = pts[i].watt;
-    }
-
-    const raw = [xs, temp, hum, fan, watt];
-
-    if (!_uplot) {
-      initUplot(raw);
-    } else if (!_zoomed) {
-      _rawData = raw;
-      _uplot.setData(buildData(raw));
-    } else {
-      _rawData = raw;
-      const curMin = _uplot.scales.x.min;
-      const curMax = _uplot.scales.x.max;
-      _uplot.setData(buildData(raw));
-      _uplot.setScale('x', { min: curMin, max: curMax });
-    }
-  } catch(e) {
-    console.warn('loadHistory error:', e);
-  }
-}
-// ── konec uPlot ────────────────────────────────────────────────────
-
 setInterval(refreshData,5000);
 refreshData();
 
-// Monitor kartici + tabela portov (osveži vsakih 30s)
+// ── uPlot ──────────────────────────────────────────────────────────
+const COLORS={temp:'#e05252',hum:'#5b9bd5',fan:'#4ec9b0',watt:'#d4a76a',grid:'#2a2a2a',text:'#888'};
+let _uplot=null,_rawData=null,_zoomed=false;
+
+function buildSeries(){
+  const s=[{}];
+  if(document.getElementById('cbTemp').checked)s.push({label:'Temp °C',stroke:COLORS.temp,width:1.5,fill:COLORS.temp+'18',scale:'temp',value:(u,v)=>v==null?'--':v.toFixed(1)+' °C'});
+  if(document.getElementById('cbHum').checked)s.push({label:'Vlaga %',stroke:COLORS.hum,width:1.5,scale:'hum',value:(u,v)=>v==null?'--':v.toFixed(0)+' %'});
+  if(document.getElementById('cbFan').checked)s.push({label:'Fan %',stroke:COLORS.fan,width:1.5,scale:'fan',value:(u,v)=>v==null?'--':v.toFixed(0)+' %'});
+  if(document.getElementById('cbWatt').checked)s.push({label:'Watt',stroke:COLORS.watt,width:1.5,scale:'watt',value:(u,v)=>v==null?'--':v.toFixed(1)+' W'});
+  return s;
+}
+function buildAxes(){
+  const cbT=document.getElementById('cbTemp').checked,cbH=document.getElementById('cbHum').checked,
+        cbF=document.getElementById('cbFan').checked,cbW=document.getElementById('cbWatt').checked;
+  const ax={stroke:COLORS.text,grid:{stroke:COLORS.grid,width:0.5},ticks:{show:false},font:'10px monospace'};
+  const axes=[{...ax,values:(u,vs)=>vs.map(v=>{if(v==null)return'';const d=new Date(v*1000);return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');})}];
+  let ld=false;
+  if(cbT){axes.push({...ax,scale:'temp',stroke:COLORS.temp,label:'°C',size:42,side:ld?1:3});if(!ld)ld=true;}
+  if(cbH){axes.push({...ax,scale:'hum',stroke:COLORS.hum,label:'%',size:42,side:ld?1:3,grid:{show:false}});if(!ld)ld=true;}
+  if(cbF){axes.push({...ax,scale:'fan',stroke:COLORS.fan,label:'Fan%',size:48,side:1,grid:{show:false}});}
+  if(cbW){axes.push({...ax,scale:'watt',stroke:COLORS.watt,label:'W',size:42,side:1,grid:{show:false}});}
+  return axes;
+}
+function buildScales(){return{x:{},temp:{range:(u,mn,mx)=>[mn-1,mx+1]},hum:{range:(u,mn,mx)=>[Math.max(0,mn-3),Math.min(100,mx+3)]},fan:{range:(u,mn,mx)=>[Math.max(0,mn-3),Math.min(100,mx+3)]},watt:{range:(u,mn,mx)=>[Math.max(0,mn-0.5),mx+0.5]}};}
+function buildData(raw){
+  if(!raw)return[[]];
+  const cbT=document.getElementById('cbTemp').checked,cbH=document.getElementById('cbHum').checked,
+        cbF=document.getElementById('cbFan').checked,cbW=document.getElementById('cbWatt').checked;
+  const o=[raw[0]];
+  if(cbT)o.push(raw[1]);if(cbH)o.push(raw[2]);if(cbF)o.push(raw[3]);if(cbW)o.push(raw[4]);
+  return o;
+}
+function getPlotWidth(){const w=document.getElementById('uplotWrap');return w?Math.max(300,w.clientWidth):600;}
+function initUplot(raw){
+  _rawData=raw;const wrap=document.getElementById('uplotWrap');if(!wrap)return;wrap.innerHTML='';
+  const has=['cbTemp','cbHum','cbFan','cbWatt'].some(id=>document.getElementById(id).checked);
+  if(!has){wrap.innerHTML='<div style="text-align:center;color:#555;padding:40px;font-size:12px">Izberi vsaj en podatek</div>';return;}
+  _uplot=new uPlot({width:getPlotWidth(),height:220,cursor:{sync:{key:'main'},drag:{x:true,y:false,setScale:false}},select:{show:true},legend:{show:true,live:true,markers:{show:true}},axes:buildAxes(),scales:buildScales(),series:buildSeries(),
+    hooks:{setSelect:[u=>{const sel=u.select;if(sel.width>10){const xMin=u.posToVal(sel.left,'x'),xMax=u.posToVal(sel.left+sel.width,'x');u.setScale('x',{min:xMin,max:xMax});u.setSelect({left:0,top:0,width:0,height:0},false);_zoomed=true;const btn=document.getElementById('zoomReset');if(btn)btn.style.display='';}
+    }],dblclick:[u=>{resetZoom();}]}},buildData(raw),wrap);
+}
+function resetZoom(){if(!_uplot||!_rawData)return;_uplot.setScale('x',{min:_rawData[0][0],max:_rawData[0][_rawData[0].length-1]});_zoomed=false;const btn=document.getElementById('zoomReset');if(btn)btn.style.display='none';}
+function rebuildUplot(){if(_rawData)initUplot(_rawData);}
+['cbTemp','cbHum','cbFan','cbWatt'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',rebuildUplot);});
+let _rt=null;window.addEventListener('resize',()=>{clearTimeout(_rt);_rt=setTimeout(()=>{if(_uplot)_uplot.setSize({width:getPlotWidth(),height:220});},150);});
+async function loadHistory(){
+  try{
+    const pts=await(await fetch('/api/history')).json();
+    if(!pts||pts.length===0)return;
+    const n=pts.length,xs=new Float64Array(n),temp=new Float64Array(n),hum=new Float64Array(n),fan=new Float64Array(n),watt=new Float64Array(n);
+    for(let i=0;i<n;i++){xs[i]=pts[i].ts;temp[i]=pts[i].temp;hum[i]=pts[i].hum;fan[i]=pts[i].fan;watt[i]=pts[i].watt;}
+    const raw=[xs,temp,hum,fan,watt];
+    if(!_uplot){initUplot(raw);}else if(!_zoomed){_rawData=raw;_uplot.setData(buildData(raw));}
+    else{_rawData=raw;const cm=_uplot.scales.x.min,cM=_uplot.scales.x.max;_uplot.setData(buildData(raw));_uplot.setScale('x',{min:cm,max:cM});}
+  }catch(e){}
+}
+
+// ── Monitor ────────────────────────────────────────────────────────
 async function refreshMonitor(){
   try{
     const d=await(await fetch('/api/monitor')).json();
@@ -732,55 +643,15 @@ async function refreshMonitor(){
     document.getElementById('mpwr').style.color=d.powered?'#30d158':'#ff9500';
     document.getElementById('msvc').textContent=d.port_ok+'/'+d.port_total;
     document.getElementById('msvd').textContent=d.all_ok?'VSI OK':'NAPAKA';
-    const box=document.getElementById('monBox');
-    box.style.display='';
+    const box=document.getElementById('monBox');box.style.display='';
     const t=document.getElementById('monTbl');
     t.innerHTML='<tr><th>Port</th><th>Servis</th><th>Status</th></tr>';
-    d.ports.forEach(p=>{
-      if(!p.enabled)return;
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td>${p.port}</td><td>${p.name}</td><td>${p.ok?'&#10003;':'&#10007;'}</td>`;
-      t.appendChild(tr);
-    });
+    d.ports.forEach(p=>{if(!p.enabled)return;const tr=document.createElement('tr');tr.innerHTML=`<td>${p.port}</td><td>${p.name}</td><td>${p.ok?'&#10003;':'&#10007;'}</td>`;t.appendChild(tr);});
   }catch(e){}
 }
-setInterval(refreshMonitor,30000);
-refreshMonitor();
+setInterval(refreshMonitor,30000);refreshMonitor();
 
-// Naloži monitor nastavitve za Tab 2
-async function loadMon(){
-  try{
-    const s=await(await fetch('/api/monitorsettings')).json();
-    document.getElementById('mIp').value=s.monitorIp;
-    document.getElementById('mWth').value=s.wattThreshold;
-    const t=document.getElementById('mPortTbl');
-    t.innerHTML='<tr><th>Port</th><th>Ime</th><th>Enable</th></tr>';
-    s.ports.forEach((p,i)=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td><input type="number" class="mp" data-i="${i}" value="${p.port}" min="0" max="65535" style="width:65px"></td><td><input type="text" class="mn" data-i="${i}" value="${p.name}" maxlength="11" style="width:80px"></td><td><input type="checkbox" class="me" data-i="${i}"${p.enabled?' checked':''}></td>`;
-      t.appendChild(tr);
-    });
-    _mL=true;
-  }catch(e){}
-}
-
-// Shrani monitor nastavitve
-async function saveMon(){
-  const ports=[];
-  for(let i=0;i<8;i++){
-    const pp=document.querySelector(`.mp[data-i="${i}"]`);
-    const pn=document.querySelector(`.mn[data-i="${i}"]`);
-    const pe=document.querySelector(`.me[data-i="${i}"]`);
-    if(pp)ports.push({port:parseInt(pp.value)||0,name:pn?pn.value:'',enabled:pe?pe.checked:false});
-  }
-  const b={monitorIp:document.getElementById('mIp').value,wattThreshold:parseFloat(document.getElementById('mWth').value)||3.0,ports};
-  const r=await fetch('/save/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const m=document.getElementById('msgM');
-  m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';
-  setTimeout(()=>m.textContent='',3000);
-}
-
-// Naloži nastavitve ventilatorja za Tab 1
+// ── Fan nastavitve ─────────────────────────────────────────────────
 async function loadFan(){
   try{
     const s=await(await fetch('/api/fansettings')).json();
@@ -791,19 +662,19 @@ async function loadFan(){
     document.getElementById('dndE').checked=s.dndEnabled;
     document.getElementById('dndF').value=s.dndFrom;
     document.getElementById('dndT').value=s.dndTo;
-    // Naloži stanje ročnega načina
-    try{
-      const m=await(await fetch('/api/fan/manual')).json();
-      document.getElementById('manToggle').checked=m.manual;
-      document.getElementById('manPct').value=m.pct;
-      document.getElementById('manPctVal').textContent=m.pct+'%';
-      updateManUI(m.manual,m.pct);
-    }catch(e){}
+    try{const m=await(await fetch('/api/fan/manual')).json();document.getElementById('manToggle').checked=m.manual;document.getElementById('manPct').value=m.pct;document.getElementById('manPctVal').textContent=m.pct+'%';updateManUI(m.manual,m.pct);}catch(e){}
     _fL=true;
   }catch(e){}
 }
+async function saveFan(){
+  const ct=[0,1,2,3].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
+  const cp=[0,1,2,3].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
+  const b={curveTemp:ct,curvePct:cp,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7};
+  const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const m=document.getElementById('msgF');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+}
 
-// Naloži kalibracijske nastavitve za Tab 2
+// ── Kalibracija ────────────────────────────────────────────────────
 async function loadCal(){
   try{
     const s=await(await fetch('/api/calsettings')).json();
@@ -815,138 +686,150 @@ async function loadCal(){
     _cL=true;
   }catch(e){}
 }
-
-// Shrani fan nastavitve
-async function saveFan(){
-  const ct=[0,1,2,3].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
-  const cp=[0,1,2,3].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
-  const b={curveTemp:ct,curvePct:cp,
-    fanMinPct:parseInt(document.getElementById('fMin').value)||0,
-    fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,
-    dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,
-    dndEnabled:document.getElementById('dndE').checked,
-    dndFrom:parseInt(document.getElementById('dndF').value)||22,
-    dndTo:parseInt(document.getElementById('dndT').value)||7};
-  const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const m=document.getElementById('msgF');
-  m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';
-  setTimeout(()=>m.textContent='',3000);
-}
-
-// Shrani kalibracijo + WiFi
 async function saveCal(){
-  const b={
-    tempOffset:parseFloat(document.getElementById('tOff').value)||0,
-    humOffset:parseFloat(document.getElementById('hOff').value)||0,
-    shuntOhms:parseFloat(document.getElementById('sOhm').value)||0.1,
-    currentCorr:parseFloat(document.getElementById('cCorr').value)||1,
-    ssid:document.getElementById('wSsid').value,
-    password:document.getElementById('wPass').value};
+  const b={tempOffset:parseFloat(document.getElementById('tOff').value)||0,humOffset:parseFloat(document.getElementById('hOff').value)||0,shuntOhms:parseFloat(document.getElementById('sOhm').value)||0.1,currentCorr:parseFloat(document.getElementById('cCorr').value)||1,ssid:document.getElementById('wSsid').value,password:document.getElementById('wPass').value};
   const r=await fetch('/save/cal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const m=document.getElementById('msgC');
-  m.textContent=r.ok?'Shranjeno! WiFi se posodobi ob resetu.':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';
-  setTimeout(()=>m.textContent='',5000);
+  const m=document.getElementById('msgC');m.textContent=r.ok?'Shranjeno! WiFi se posodobi ob resetu.':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',5000);
 }
 
-// Sistemske informacije (Tab 3)
-async function fetchSys(){
+// ── Monitor nastavitve ─────────────────────────────────────────────
+async function loadMon(){
   try{
-    const d=await(await fetch('/api/data')).json();
-    document.getElementById('sysinfo').innerHTML=
-      `<div class="ir"><span class="ik">IP</span><span class="iv">${d.ip}</span></div>`+
-      `<div class="ir"><span class="ik">RSSI</span><span class="iv">${d.rssi} dBm</span></div>`+
-      `<div class="ir"><span class="ik">Uptime</span><span class="iv">${fUp(d.uptime)}</span></div>`+
-      `<div class="ir"><span class="ik">Firmware</span><span class="iv">${d.fw}</span></div>`+
-      `<div class="ir"><span class="ik">Free heap</span><span class="iv">${d.heap} B</span></div>`+
-      `<div class="ir"><span class="ik">Napake</span><span class="iv"><span class="eb ${d.err===0?'eok':'efail'}">${d.err===0?'OK':'ERR 0x'+d.err.toString(16).toUpperCase()}</span></span></div>`;
+    const s=await(await fetch('/api/monitorsettings')).json();
+    document.getElementById('mIp').value=s.monitorIp;
+    document.getElementById('mWth').value=s.wattThreshold;
+    const t=document.getElementById('mPortTbl');
+    t.innerHTML='<tr><th>Port</th><th>Ime</th><th>Enable</th></tr>';
+    s.ports.forEach((p,i)=>{const tr=document.createElement('tr');tr.innerHTML=`<td><input type="number" class="mp" data-i="${i}" value="${p.port}" min="0" max="65535" style="width:65px"></td><td><input type="text" class="mn" data-i="${i}" value="${p.name}" maxlength="11" style="width:80px"></td><td><input type="checkbox" class="me" data-i="${i}"${p.enabled?' checked':''}></td>`;t.appendChild(tr);});
+    _mL=true;
   }catch(e){}
 }
+async function saveMon(){
+  const ports=[];
+  for(let i=0;i<8;i++){const pp=document.querySelector(`.mp[data-i="${i}"]`),pn=document.querySelector(`.mn[data-i="${i}"]`),pe=document.querySelector(`.me[data-i="${i}"]`);if(pp)ports.push({port:parseInt(pp.value)||0,name:pn?pn.value:'',enabled:pe?pe.checked:false});}
+  const b={monitorIp:document.getElementById('mIp').value,wattThreshold:parseFloat(document.getElementById('mWth').value)||3.0,ports};
+  const r=await fetch('/save/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const m=document.getElementById('msgM');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+}
 
-// RAM Log
-async function fetchLog(){
+// ── LED toggle ─────────────────────────────────────────────────────
+async function loadLed(){
   try{
-    const logs=await(await fetch('/api/log')).json();
-    const t=document.getElementById('logtbl');
-    t.innerHTML='<tr><th>Čas</th><th>Level</th><th>Tag</th><th>Sporočilo</th></tr>';
-    logs.forEach(e=>{
-      const cls=e.level==='ERROR'?'le':e.level==='WARN'?'lw':'li';
-      const tr=document.createElement('tr');tr.className=cls;
-      tr.innerHTML=`<td>${e.time}</td><td>${e.level}</td><td>${e.tag}</td><td>${e.msg}</td>`;
-      t.appendChild(tr);
-    });
+    const d=await(await fetch('/api/led')).json();
+    updateLedUI(d.enabled);
   }catch(e){}
 }
-
-async function clearLog(){
-  try{await fetch('/api/log/clear',{method:'POST'});fetchLog();}catch(e){}
+function updateLedUI(en){
+  const lbl=document.getElementById('ledLabel'),
+        tog=document.getElementById('ledToggle'),
+        tr=document.getElementById('ledTrack'),
+        kn=document.getElementById('ledKnob');
+  tog.checked=en;
+  lbl.textContent=en?'ENABLED':'DISABLED';
+  lbl.style.color=en?'#30d158':'#555';
+  tr.style.background=en?'#30d158':'#2a2a2a';
+  kn.style.left=en?'23px':'3px';
 }
-
-function updateManUI(isMan,pct){
-  const lbl=document.getElementById('modeLabel');
-  const wrap=document.getElementById('manSliderWrap');
-  const btn=document.getElementById('manApplyBtn');
-  const knob=document.getElementById('manKnob');
-  const track=document.getElementById('manSliderToggle');
-  if(isMan){
-    lbl.textContent='ROČNO';lbl.style.color='#ff6b00';
-    wrap.style.display='';btn.style.display='';
-    track.style.background='#ff6b00';knob.style.left='23px';
-  }else{
-    lbl.textContent='AVTOMATSKO';lbl.style.color='#aaa';
-    wrap.style.display='none';btn.style.display='none';
-    track.style.background='#2a2a2a';knob.style.left='3px';
-  }
-  if(pct!==undefined){
-    document.getElementById('manPct').value=pct;
-    document.getElementById('manPctVal').textContent=pct+'%';
-  }
-}
-function onManToggle(){
-  const tog=document.getElementById('manToggle');
-  tog.dataset.userEditing='1';
-  updateManUI(tog.checked);
-  if(!tog.checked){
-    fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({manual:false,pct:0})})
-    .then(()=>{
-      const m=document.getElementById('msgMan');
-      m.textContent='Avtomatsko';m.style.color='#30d158';
-      setTimeout(()=>{m.textContent='';delete tog.dataset.userEditing;},2000);
-    });
-  }else{
-    delete tog.dataset.userEditing;
-  }
-}
-function onManSlider(){
-  const v=document.getElementById('manPct').value;
-  document.getElementById('manPctVal').textContent=v+'%';
-}
-async function applyManual(){
-  const pct=parseInt(document.getElementById('manPct').value)||0;
-  const r=await fetch('/api/fan/manual',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({manual:true,pct:pct})});
-  const m=document.getElementById('msgMan');
-  m.textContent=r.ok?'Nastavljeno '+pct+'%':'Napaka!';
+async function onLedToggle(){
+  const en=document.getElementById('ledToggle').checked;
+  updateLedUI(en);
+  const r=await fetch('/api/led',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:en})});
+  const m=document.getElementById('msgLed');
+  m.textContent=r.ok?(en?'LED vklopljena':'LED izklopljena'):'Napaka!';
   m.style.color=r.ok?'#30d158':'#ff3b30';
   setTimeout(()=>m.textContent='',3000);
 }
 
-// OTA upload
+// ── Sistemske informacije ──────────────────────────────────────────
+function buildSysInfo(d){
+  const si=document.getElementById('sysinfo');
+  if(!si)return;
+  const hFree=d.heap_free||0,hTotal=d.heap_total||0,hMin=d.heap_min||0;
+  const pFree=d.psram_free||0,pTotal=d.psram_total||0;
+  const rows=[
+    ['IP',d.ip||'--'],
+    ['MAC',d.mac||'--'],
+    ['RSSI',d.rssi?d.rssi+' dBm':'--'],
+    ['Uptime',fUp(d.uptime||0)],
+    ['Firmware',d.fw||'--'],
+    ['Chip',d.chip_model?(d.chip_model+' rev'+d.chip_rev):'--'],
+    ['CPU',d.cpu_freq?d.cpu_freq+' MHz':'--'],
+    ['Flash',fBytes(d.flash_size||0)],
+    ['Heap free',fBytes(hFree)+' ('+fPct(hFree,hTotal)+')'],
+    ['Heap min ever',fBytes(hMin)],
+    ['PSRAM free',fBytes(pFree)+' ('+fPct(pFree,pTotal)+')'],
+    ['PSRAM total',fBytes(pTotal)],
+    ['Napake',d.err===0?'<span class="eb eok">OK</span>':'<span class="eb efail">ERR 0x'+d.err.toString(16).toUpperCase()+'</span>'],
+  ];
+  si.innerHTML=rows.map(([k,v])=>`<div class="ir"><span class="ik">${k}</span><span class="iv">${v}</span></div>`).join('');
+}
+async function fetchSys(){
+  try{const d=await(await fetch('/api/data')).json();buildSysInfo(d);}catch(e){}
+}
+
+// ── RAM Log s filtrom ──────────────────────────────────────────────
+let _allLogs=[];
+async function fetchLog(){
+  try{
+    _allLogs=await(await fetch('/api/log')).json();
+    applyLogFilter();
+  }catch(e){}
+}
+function applyLogFilter(){
+  const showI=document.getElementById('fInfo').checked,
+        showW=document.getElementById('fWarn').checked,
+        showE=document.getElementById('fErr').checked;
+  const t=document.getElementById('logtbl');
+  t.innerHTML='<tr><th>Čas</th><th>Lvl</th><th>Tag</th><th>Sporočilo</th></tr>';
+  _allLogs.forEach(e=>{
+    if(e.level==='INFO'&&!showI)return;
+    if(e.level==='WARN'&&!showW)return;
+    if(e.level==='ERROR'&&!showE)return;
+    const cls=e.level==='ERROR'?'le':e.level==='WARN'?'lw':'li';
+    const tr=document.createElement('tr');tr.className=cls;
+    tr.innerHTML=`<td>${e.time}</td><td>${e.level}</td><td>${e.tag}</td><td>${e.msg}</td>`;
+    t.appendChild(tr);
+  });
+  const box=document.getElementById('logbox');
+  if(box)box.scrollTop=box.scrollHeight;
+}
+async function clearLog(){
+  try{await fetch('/api/log/clear',{method:'POST'});_allLogs=[];applyLogFilter();}catch(e){}
+}
+
+// ── Manual fan ─────────────────────────────────────────────────────
+function updateManUI(isMan,pct){
+  const lbl=document.getElementById('modeLabel'),wrap=document.getElementById('manSliderWrap'),
+        btn=document.getElementById('manApplyBtn'),knob=document.getElementById('manKnob'),
+        track=document.getElementById('manSliderToggle');
+  if(isMan){lbl.textContent='ROČNO';lbl.style.color='#ff6b00';wrap.style.display='';btn.style.display='';track.style.background='#ff6b00';knob.style.left='23px';}
+  else{lbl.textContent='AVTOMATSKO';lbl.style.color='#aaa';wrap.style.display='none';btn.style.display='none';track.style.background='#2a2a2a';knob.style.left='3px';}
+  if(pct!==undefined){document.getElementById('manPct').value=pct;document.getElementById('manPctVal').textContent=pct+'%';}
+}
+function onManToggle(){
+  const tog=document.getElementById('manToggle');tog.dataset.userEditing='1';updateManUI(tog.checked);
+  if(!tog.checked){fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({manual:false,pct:0})}).then(()=>{const m=document.getElementById('msgMan');m.textContent='Avtomatsko';m.style.color='#30d158';setTimeout(()=>{m.textContent='';delete tog.dataset.userEditing;},2000);});}
+  else{delete tog.dataset.userEditing;}
+}
+function onManSlider(){const v=document.getElementById('manPct').value;document.getElementById('manPctVal').textContent=v+'%';}
+async function applyManual(){
+  const pct=parseInt(document.getElementById('manPct').value)||0;
+  const r=await fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({manual:true,pct:pct})});
+  const m=document.getElementById('msgMan');m.textContent=r.ok?'Nastavljeno '+pct+'%':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+}
+
+// ── OTA ────────────────────────────────────────────────────────────
 document.getElementById('otaF').onsubmit=function(e){
   e.preventDefault();
   const f=document.getElementById('otaBin').files[0];if(!f)return;
-  const btn=this.querySelector('button[type=submit]'),
-        bar=document.getElementById('otaBar'),
-        prg=document.getElementById('otaPrg'),
-        st=document.getElementById('otaSt');
+  const btn=this.querySelector('button[type=submit]'),bar=document.getElementById('otaBar'),
+        prg=document.getElementById('otaPrg'),st=document.getElementById('otaSt');
   btn.disabled=true;prg.style.display='block';st.textContent='Nalaganje...';
   const xhr=new XMLHttpRequest();
   xhr.upload.onprogress=function(ev){if(ev.lengthComputable){const p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';st.textContent='Nalaganje: '+p+'%';}};
   xhr.onload=function(){if(xhr.status===200){bar.style.width='100%';bar.style.background='#30d158';st.textContent='Uspelo! Naprava se resetira v 5s...';setTimeout(()=>{location.href='/';},5500);}else{bar.style.background='#ff3b30';st.textContent='Napaka: '+xhr.responseText;btn.disabled=false;}};
   xhr.onerror=function(){st.textContent='Napaka pri prenosu!';btn.disabled=false;};
-  const fd=new FormData();fd.append('update',f);
-  xhr.open('POST','/update');xhr.send(fd);
+  const fd=new FormData();fd.append('update',f);xhr.open('POST','/update');xhr.send(fd);
 };
 </script></body></html>
 )rawliteral";
@@ -997,7 +880,7 @@ void initWebserver() {
 
     // --- GET /api/data → JSON trenutnih vrednosti ---
     server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<768> doc;
+        StaticJsonDocument<1024> doc;
         portENTER_CRITICAL(&dataMux);
         float temp = sensorData.temp, hum = sensorData.hum;
         float volt = sensorData.volt, amp = sensorData.amp, watt = sensorData.watt;
@@ -1037,7 +920,19 @@ void initWebserver() {
         doc["ip"]     = WIFI_STATIC_IP;
         doc["err"]    = err;
         doc["fw"]     = FW_VERSION;
-        doc["heap"]   = ESP.getFreeHeap();
+
+        // Sistemski podatki za Tab 3
+        doc["heap_free"]     = ESP.getFreeHeap();
+        doc["heap_total"]    = ESP.getHeapSize();
+        doc["heap_min"]      = ESP.getMinFreeHeap();
+        doc["psram_free"]    = ESP.getFreePsram();
+        doc["psram_total"]   = ESP.getPsramSize();
+        doc["cpu_freq"]      = ESP.getCpuFreqMHz();
+        doc["flash_size"]    = ESP.getFlashChipSize();
+        doc["chip_model"]    = ESP.getChipModel();
+        doc["chip_rev"]      = ESP.getChipRevision();
+        doc["mac"]           = WiFi.macAddress();
+        doc["led_enabled"]   = settings.ledEnabled;
 
         String resp;
         serializeJson(doc, resp);
@@ -1455,6 +1350,48 @@ void initWebserver() {
                 else
                     LOG_ERROR("OTA", "end failed: %s", Update.errorString());
             }
+        }
+    );
+
+    // --- GET /api/led → vrni stanje LED ---
+    server.on("/api/led", HTTP_GET, [](AsyncWebServerRequest *request){
+        StaticJsonDocument<32> doc;
+        doc["enabled"] = settings.ledEnabled;
+        String resp;
+        serializeJson(doc, resp);
+        request->send(200, "application/json", resp);
+    });
+
+    // --- POST /api/led → nastavi stanje LED ---
+    server.on("/api/led", HTTP_POST,
+        [](AsyncWebServerRequest *request){},
+        NULL,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+           size_t index, size_t total){
+            static char _ledBuf[64];
+            static size_t _ledLen = 0;
+            if (index == 0) { _ledLen = 0; memset(_ledBuf, 0, sizeof(_ledBuf)); }
+            size_t cp = min(len, sizeof(_ledBuf) - 1 - _ledLen);
+            memcpy(_ledBuf + _ledLen, data, cp);
+            _ledLen += cp;
+            if (index + len != total) return;
+
+            StaticJsonDocument<32> doc;
+            if (deserializeJson(doc, _ledBuf)) {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            settings.ledEnabled = doc["enabled"] | true;
+            saveSettings();
+            if (!settings.ledEnabled) {
+                ledOff();
+            } else {
+                if (sensorData.err == ERR_NONE)      ledGreen();
+                else if (sensorData.err & ERR_WIFI)  ledRed();
+                else                                  ledOrange();
+            }
+            LOG_INFO("WEB", "/api/led — enabled=%s", settings.ledEnabled ? "true" : "false");
+            request->send(200, "application/json", "{\"status\":\"OK\"}");
         }
     );
 

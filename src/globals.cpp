@@ -101,6 +101,8 @@ static void initDefaults() {
         settings.monitorPorts[i].enabled = false;
     }
 
+    settings.ledEnabled = true;
+
     Serial.println("[Settings] Privzete vrednosti nastavljene");
 }
 

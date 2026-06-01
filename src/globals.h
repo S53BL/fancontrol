@@ -66,6 +66,8 @@ struct Settings {
         char     name[12];
         bool     enabled;
     } monitorPorts[MONITOR_MAX_PORTS];
+
+    bool    ledEnabled;         // RGB LED omogočena (false = LED nikoli ne sveti)
 };
 
 // --- Extern deklaracije ---
