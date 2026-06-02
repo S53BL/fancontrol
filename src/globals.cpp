@@ -110,6 +110,8 @@ static void initDefaults() {
     settings.boostPct           = BOOST_PCT_DEFAULT;
     settings.boostLocked        = false;
     settings.boostEvalMs        = BOOST_EVAL_MS_DEFAULT;
+    settings.fanPwmFreq   = FAN_PWM_FREQ;
+    settings.fanPwmInvert = false;
 
     Serial.println("[Settings] Privzete vrednosti nastavljene");
 }

@@ -1,4 +1,4 @@
-// globals.h — Globalne spremenljivke za fancontrol
+﻿// globals.h — Globalne spremenljivke za fancontrol
 #pragma once
 #include "config.h"
 #include <Preferences.h>
@@ -78,6 +78,10 @@ struct Settings {
     uint8_t  boostPct;
     bool     boostLocked;
     uint32_t boostEvalMs;
+
+    // PWM kalibracija
+    uint32_t fanPwmFreq;    // PWM frekvenca ventilatorja [Hz], privzeto 25000
+    bool     fanPwmInvert;  // Invertiran delovni cikel (HIGH=stop, LOW=tece), privzeto false
 };
 
 // --- Watt Boost stanje (runtime, ne v NVS) ---
@@ -134,3 +138,4 @@ void initGlobals();
 void loadSettings();
 void saveSettings();
 void resetSettings();
+

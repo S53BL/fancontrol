@@ -36,7 +36,9 @@ static uint8_t interpolateCurve(float temp) {
 // --- Inicializacija ---
 void initFan() {
     // IDF 5.x API: ledcAttach(pin, freq, resolution) — channel se dodeli avtomatsko
-    ledcAttach(PIN_FAN_PWM, FAN_PWM_FREQ, FAN_PWM_RESOLUTION);
+    uint32_t freq = (settings.fanPwmFreq >= 10 && settings.fanPwmFreq <= 50000)
+                    ? settings.fanPwmFreq : FAN_PWM_FREQ;
+    ledcAttach(PIN_FAN_PWM, freq, FAN_PWM_RESOLUTION);
     // Zaščita: ne izklopimo ventilatorja ob zagonu
     setFanPct(settings.fanMinPct);
     LOG_INFO("FAN", "Init OK — min %d%%", settings.fanMinPct);
@@ -49,7 +51,12 @@ void setFanPct(uint8_t pct) {
     pct = constrain(pct, 0, 100);
     _fanPct = pct;
 
-    uint8_t duty = (uint8_t)map(pct, 0, 100, FAN_PWM_MIN, FAN_PWM_MAX);
+    uint8_t duty;
+    if (settings.fanPwmInvert) {
+        duty = (uint8_t)map(pct, 0, 100, FAN_PWM_MAX, FAN_PWM_MIN);
+    } else {
+        duty = (uint8_t)map(pct, 0, 100, FAN_PWM_MIN, FAN_PWM_MAX);
+    }
     ledcWrite(PIN_FAN_PWM, duty);
 
     portENTER_CRITICAL(&dataMux);
@@ -58,6 +65,17 @@ void setFanPct(uint8_t pct) {
 }
 
 uint8_t getFanPct() { return _fanPct; }
+
+// --- Reinit PWM ob spremembi frekvence ali invert (brez reseta) ---
+void reinitFanPwm() {
+    uint32_t freq = (settings.fanPwmFreq >= 10 && settings.fanPwmFreq <= 50000)
+                    ? settings.fanPwmFreq : FAN_PWM_FREQ;
+    ledcDetach(PIN_FAN_PWM);
+    ledcAttach(PIN_FAN_PWM, freq, FAN_PWM_RESOLUTION);
+    setFanPct(_fanPct);
+    LOG_INFO("FAN", "PWM reinit — freq=%lu Hz  invert=%s",
+             (unsigned long)freq, settings.fanPwmInvert ? "ON" : "off");
+}
 
 // --- DND (nočni tihi način) ---
 bool isDndActive() {

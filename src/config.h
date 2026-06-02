@@ -33,7 +33,7 @@
 
 // --- PWM konfiguracija ventilatorja ---
 #define FAN_PWM_CHANNEL     0
-#define FAN_PWM_FREQ        1000    // 1 kHz — primerno za 2-pin ventilator
+#define FAN_PWM_FREQ        25000   // 25 kHz — nad slišnim pragom (Intel PWM standard)
 #define FAN_PWM_RESOLUTION  8       // 8-bit: 0–255
 #define FAN_PWM_MIN         0       // 0% (ventilator izklopljen)
 #define FAN_PWM_MAX         255     // 100%

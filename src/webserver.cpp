@@ -235,54 +235,6 @@ static void syncNTP() {
 // =====================================================================
 // OTA HTML — identično vent_SEW, prilagojeno za fancontrol
 // =====================================================================
-static const char OTA_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html><html lang="sl"><head><meta charset="UTF-8">
-<title>fancontrol OTA Update</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-*{box-sizing:border-box}
-body{font-family:Arial,sans-serif;background:#0d0d0d;color:#e0e0e0;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
-h1{color:#00d4ff;margin-bottom:8px}
-.sub{color:#888;font-size:14px;margin-bottom:30px}
-.card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:30px 36px;width:100%;max-width:480px;text-align:center}
-input[type=file]{display:block;width:100%;padding:10px;margin:16px 0 20px;background:#2a2a2a;border:2px dashed #555;border-radius:6px;color:#e0e0e0;cursor:pointer}
-input[type=file]:hover{border-color:#00d4ff}
-.btn{display:inline-block;padding:12px 32px;background:#00d4ff;color:#0d0d0d;border:none;border-radius:6px;font-size:16px;font-weight:bold;cursor:pointer;width:100%}
-.btn:hover{background:#33dfff}
-.btn:disabled{background:#555;color:#888;cursor:not-allowed}
-#progress{width:100%;background:#2a2a2a;border-radius:4px;height:18px;margin-top:18px;display:none;overflow:hidden}
-#bar{height:100%;background:#00d4ff;width:0;transition:width 0.3s;border-radius:4px}
-#status{margin-top:14px;font-size:14px;color:#00d4ff;min-height:20px}
-.nav{margin-top:28px;font-size:14px}.nav a{color:#00d4ff;text-decoration:none}
-</style></head><body>
-<h1>&#11014; OTA Firmware Update</h1>
-<p class="sub">fancontrol — ESP32-S3</p>
-<div class="card">
-<form id="upForm">
-<input type="file" id="file" accept=".bin" required>
-<button class="btn" id="btn" type="submit">Nalozi firmware</button>
-</form>
-<div id="progress"><div id="bar"></div></div>
-<div id="status"></div>
-</div>
-<div class="nav"><a href="/">&#8592; Nazaj</a></div>
-<script>
-document.getElementById('upForm').onsubmit=function(e){
-  e.preventDefault();
-  const f=document.getElementById('file').files[0];if(!f)return;
-  const btn=document.getElementById('btn'),bar=document.getElementById('bar'),
-        prog=document.getElementById('progress'),status=document.getElementById('status');
-  btn.disabled=true;prog.style.display='block';status.textContent='Nalaganje...';
-  const xhr=new XMLHttpRequest();
-  xhr.upload.onprogress=function(e){if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);bar.style.width=p+'%';status.textContent='Nalaganje: '+p+'%';}};
-  xhr.onload=function(){if(xhr.status===200){bar.style.width='100%';bar.style.background='#30d158';status.textContent='Uspelo! Naprava se resetira v 5s...';setTimeout(()=>{location.href='/';},5500);}else{bar.style.background='#ff3b30';status.textContent='Napaka: '+xhr.responseText;btn.disabled=false;}};
-  xhr.onerror=function(){status.textContent='Napaka pri prenosu!';btn.disabled=false;};
-  const form=new FormData();form.append('update',f);
-  xhr.open('POST','/update');xhr.send(form);
-};
-</script></body></html>
-)rawliteral";
-
 // =====================================================================
 // Glavna SPA stran — dark tehno tema, 4 tabi
 // =====================================================================
@@ -410,6 +362,10 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div style="position:relative;width:100%">
   <svg id="fanCurveSvg" viewBox="0 0 520 220" style="width:100%;display:block;background:#0d0d0d;border-radius:6px;overflow:visible"></svg>
 </div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+  <button class="btn" onclick="saveFan('msgF1')">Shrani</button>
+  <span class="msg" id="msgF1"></span>
+</div>
 <!-- Legenda -->
 <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:8px;font-size:10px;color:#888;padding:0 4px">
   <span><svg width="28" height="8" style="vertical-align:middle"><line x1="0" y1="4" x2="28" y2="4" stroke="#444" stroke-width="1.5" stroke-dasharray="4,3"/></svg> Default krivulja</span>
@@ -424,14 +380,27 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </div>
 <!-- Inline edit popup (skrit) -->
 <div id="curveEditPopup" style="display:none;position:absolute;z-index:100;background:#1a1a1a;border:1px solid #00d4ff;border-radius:6px;padding:10px 14px;font-size:12px;box-shadow:0 4px 16px #000a">
-  <div style="color:#555;font-size:10px;margin-bottom:4px" id="editPopupLabel">Točka 0</div>
-  <div style="display:flex;align-items:center;gap:8px">
-    <span style="color:#aaa">Fan%:</span>
-    <input type="number" id="editPopupInput" min="0" max="100" style="width:60px;background:#0d0d0d;border:1px solid #333;color:#e0e0e0;padding:3px 6px;border-radius:4px;font-family:monospace">
-    <button onclick="editPopupApply()" style="padding:3px 10px;background:#00d4ff;color:#0d0d0d;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px">OK</button>
-    <button onclick="editPopupClose()" style="padding:3px 8px;background:#2a2a2a;color:#aaa;border:none;border-radius:4px;cursor:pointer;font-size:11px">&#x2715;</button>
+  <div style="color:#555;font-size:10px;margin-bottom:6px" id="editPopupLabel">Točka 0</div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="color:#aaa;min-width:36px">Temp:</span>
+      <input type="number" id="editPopupTemp" min="0" max="80" step="0.5"
+        style="width:64px;background:#0d0d0d;border:1px solid #333;color:#e0e0e0;padding:3px 6px;border-radius:4px;font-family:monospace">
+      <span style="color:#555;font-size:10px">°C</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="color:#aaa;min-width:36px">Fan%:</span>
+      <input type="number" id="editPopupInput" min="0" max="100"
+        style="width:64px;background:#0d0d0d;border:1px solid #333;color:#e0e0e0;padding:3px 6px;border-radius:4px;font-family:monospace">
+      <span style="color:#555;font-size:10px">%</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:2px">
+      <button onclick="editPopupApply()" style="flex:1;padding:4px 10px;background:#00d4ff;color:#0d0d0d;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px">OK</button>
+      <button onclick="editPopupClose()" style="padding:4px 10px;background:#2a2a2a;color:#aaa;border:none;border-radius:4px;cursor:pointer;font-size:11px">&#x2715;</button>
+    </div>
   </div>
-  <div style="font-size:10px;color:#ff9500;margin-top:4px" id="editPopupLockWarn"></div>
+  <div style="font-size:10px;color:#ff3b30;margin-top:4px;display:none" id="editPopupErr"></div>
+  <div style="font-size:10px;color:#ff9500;margin-top:2px" id="editPopupLockWarn"></div>
 </div>
 </div>
 <!-- Ročno upravljanje — PRVI blok -->
@@ -461,6 +430,10 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </div>
 <!-- Temperaturna krivulja -->
 <div class="sec"><h3>Temperaturna krivulja</h3>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+  <button class="btn" onclick="saveFan('msgF3')">Shrani</button>
+  <span class="msg" id="msgF3"></span>
+</div>
 <table class="ctbl" style="margin-bottom:14px">
 <tr><th>Točka</th><th>Opis</th><th>Temp [°C]</th><th>Fan [%]</th><th>Conf</th><th>Zakleni</th></tr>
 <tr><td>0</td><td style="color:#888;font-size:10px">Mirovanje</td><td><input type="number" id="ct0" min="0" max="80" step="0.5" style="width:70px"></td><td><input type="number" id="cp0" min="0" max="100" style="width:60px"></td><td><span id="cc0" style="color:#00d4ff;font-size:11px">--</span></td><td><input type="checkbox" id="cl0" style="accent-color:#ff9500"></td></tr>
@@ -473,7 +446,10 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div style="margin-bottom:12px;font-size:10px;color:#555">
   Confidence: število ravnovesnih opazovanj (prag za aktivacijo: 20).
   Zaklenjene točke algoritem ne posodablja.
-  <button class="btn bsm bto" onclick="adaptReset()" style="margin-left:12px">Reset učenja</button>
+</div>
+<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+  <button class="btn bsm bto" onclick="adaptReset()"
+    style="font-size:10px;padding:3px 10px;opacity:0.7">↺ Reset učenja</button>
 </div>
 </div>
 <!-- Watt Boost -->
@@ -483,13 +459,20 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
   Sistem oceni rezultat po nastavljenem času in se samodejno kalibrira.
 </p>
 <div class="fr"><label>Prag obremenitve [W]</label><input type="number" id="bWth" min="1" max="50" step="0.5" style="width:80px"></div>
+<div class="fr"><label>Zakleni boost% (ne uči se)</label>
+  <input type="checkbox" id="bLock" style="accent-color:#ff9500" onchange="onBoostLockChange()">
+</div>
 <div class="fr"><label>Boost vrednost [%]</label>
   <input type="number" id="bPct" min="5" max="40" style="width:70px">
-  &nbsp;<span id="bPctConf" style="font-size:11px;color:#555"></span>
+  &nbsp;<span id="bPctConf" style="font-size:11px;font-weight:bold;padding:2px 7px;border-radius:3px"></span>
+  <span style="font-size:10px;color:#555;margin-left:6px">privzeto: 20%</span>
 </div>
 <div class="fr"><label>Ocenjevalni čas [min]</label><input type="number" id="bEval" min="1" max="10" style="width:70px"></div>
-<div class="fr"><label>Zakleni boost% (ne uči se)</label><input type="checkbox" id="bLock" style="accent-color:#ff9500"></div>
 <div class="fr"><label>Status</label><span id="bStatus" style="font-size:12px;color:#555">--</span></div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+  <button class="btn" onclick="saveFan('msgF4')">Shrani</button>
+  <span class="msg" id="msgF4"></span>
+</div>
 </div>
 <!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
@@ -499,7 +482,8 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>DND omogočen</label><input type="checkbox" id="dndE"></div>
 <div class="fr"><label>DND od ure (0–23)</label><input type="number" id="dndF" min="0" max="23" style="width:70px"></div>
 <div class="fr"><label>DND do ure (0–23)</label><input type="number" id="dndT" min="0" max="23" style="width:70px"></div>
-<button class="btn" onclick="saveFan()">Shrani</button><span class="msg" id="msgF"></span>
+<button class="btn" onclick="saveFan('msgF5')">Shrani</button>
+<span class="msg" id="msgF5"></span>
 </div>
 </div>
 
@@ -540,6 +524,31 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
   </div>
 </div>
 <span class="msg" id="msgLed"></span>
+</div>
+<!-- PWM kalibracija -->
+<div class="sec"><h3>PWM Kalibracija</h3>
+<div class="fr">
+  <label style="min-width:170px">Frekvenca [Hz]</label>
+  <input type="number" id="pwmFreq" min="10" max="50000" step="1" style="width:100px">
+  <span style="font-size:10px;color:#555;margin-left:8px">10 – 50000 Hz &nbsp;|&nbsp; priporočeno: 25000</span>
+</div>
+<div class="fr">
+  <label style="min-width:170px">Invert delovni cikel</label>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span id="pwmInvLabel" style="font-size:12px;color:#aaa;min-width:70px">--</span>
+    <label class="tgsw">
+      <input type="checkbox" id="pwmInvToggle" onchange="onPwmInvToggle()">
+      <span class="tgtr" id="pwmInvTrack"><span class="tgkn" id="pwmInvKnob"></span></span>
+    </label>
+  </div>
+</div>
+<div style="margin-bottom:8px;font-size:10px;color:#555">
+  Invert: HIGH=stop, LOW=teče. Normalno (off): LOW=stop, HIGH=teče.
+</div>
+<div style="display:flex;align-items:center;gap:10px">
+  <button class="btn" onclick="savePwmCal()">Shrani in aktiviraj</button>
+  <span class="msg" id="msgPwm"></span>
+</div>
 </div>
 </div>
 
@@ -624,7 +633,7 @@ async function refreshData(){
     document.getElementById('cman').textContent=d.manual?'ROČNO':'';
     if(atab===1){
       const tog=document.getElementById('manToggle');
-      if(tog&&!tog.dataset.userEditing){tog.checked=d.manual;updateManUI(d.manual,d.manual_pct);}
+      if(tog)updateManUI(d.manual,d.manual_pct);
     }
     document.getElementById('pkt').textContent=d.peak_temp>-900?'Peak: '+d.peak_temp+' °C':'';
     document.getElementById('pkw').textContent=d.peak_watt>0?'Peak: '+d.peak_watt+' W':'';
@@ -637,7 +646,15 @@ async function refreshData(){
       if(d.boost_active){bEl.textContent='AKTIVEN +'+d.boost_pct+'%';bEl.style.color='#ff9500';}
       else{bEl.textContent='neaktiven';bEl.style.color='#555';}
     }
-    if(atab===1 && _curveData) drawFanCurveFromCache();
+    if(atab===1 && _curveData){
+      const liveTemp = parseFloat(document.getElementById('ct').textContent) || null;
+      const boostStr = d.boost_active ? ('1'+d.boost_pct) : '0';
+      const curKey   = (liveTemp ? liveTemp.toFixed(1) : 'null') + '|' + boostStr;
+      if(curKey !== _lastLiveTemp){
+        _lastLiveTemp = curKey;
+        drawFanCurveFromCache();
+      }
+    }
   }catch(e){}
 }
 setInterval(refreshData,5000);
@@ -646,6 +663,8 @@ refreshData();
 // ── uPlot ──────────────────────────────────────────────────────────
 const COLORS={temp:'#e05252',hum:'#5b9bd5',fan:'#4ec9b0',watt:'#d4a76a',grid:'#2a2a2a',text:'#888'};
 let _uplot=null,_rawData=null,_zoomed=false;
+let _lastCurveFanPct = null;
+let _lastLiveTemp = null;
 
 function buildSeries(){
   const s=[{}];
@@ -767,7 +786,7 @@ function drawFanCurve(s, liveTemp, boostActive, boostPct){
     svg.appendChild(svgEl('text',{x:GC.left-4,y:y+4,'text-anchor':'end',
       fill:'#444','font-size':'9','font-family':'monospace'})).textContent=p+'%';
   });
-  CURVE_DEF_TEMP.forEach(t=>{
+  s.curveTemp.forEach(t=>{
     const x=gcX(t);
     svg.appendChild(svgEl('line',{x1:x,y1:GC.top,x2:x,y2:GC.top+GC.plotH,
       stroke:'#1a1a1a','stroke-width':'1'}));
@@ -784,21 +803,21 @@ function drawFanCurve(s, liveTemp, boostActive, boostPct){
   svg.appendChild(svgEl('polyline',{points:defPts,fill:'none',stroke:'#444',
     'stroke-width':'1.5','stroke-dasharray':'5,4'}));
 
-  let actPts = CURVE_DEF_TEMP.map((t,i)=>`${gcX(t)},${gcY(s.curvePct[i])}`).join(' ');
-  const fillPts = `${gcX(CURVE_DEF_TEMP[0])},${gcY(0)} ` + actPts +
-                  ` ${gcX(CURVE_DEF_TEMP[5])},${gcY(0)}`;
+  let actPts = s.curveTemp.map((t,i)=>`${gcX(t)},${gcY(s.curvePct[i])}`).join(' ');
+  const fillPts = `${gcX(s.curveTemp[0])},${gcY(0)} ` + actPts +
+                  ` ${gcX(s.curveTemp[5])},${gcY(0)}`;
   svg.appendChild(svgEl('polygon',{points:fillPts,fill:'#00d4ff0d',stroke:'none'}));
   svg.appendChild(svgEl('polyline',{points:actPts,fill:'none',stroke:'#00d4ff',
     'stroke-width':'2'}));
 
-  CURVE_DEF_TEMP.forEach((t,i)=>{
+  s.curveTemp.forEach((t,i)=>{
     const x = gcX(t);
     const y = gcY(s.curvePct[i]);
     const locked = s.curveLocked && s.curveLocked[i];
     const conf   = s.curveConfidence ? s.curveConfidence[i] : 0;
     const cColor = confColor(conf, thresh);
 
-    const hit = svgEl('circle',{cx:x,cy:y,r:'14',fill:'transparent',
+    const hit = svgEl('circle',{cx:x,cy:y,r:'22',fill:'transparent',
       style:'cursor:pointer'});
     hit.addEventListener('click', e=>{ e.stopPropagation(); editPopupOpen(i,x,y,s); });
     svg.appendChild(hit);
@@ -827,9 +846,9 @@ function drawFanCurve(s, liveTemp, boostActive, boostPct){
     svg.appendChild(svgEl('line',{x1:tx,y1:GC.top,x2:tx,y2:GC.top+GC.plotH,
       stroke:'#e05252','stroke-width':'1.5','stroke-dasharray':'3,2'}));
     let fPct = s.curvePct[0];
-    for(let i=0;i<CURVE_DEF_TEMP.length-1;i++){
-      if(liveTemp>=CURVE_DEF_TEMP[i]&&liveTemp<CURVE_DEF_TEMP[i+1]){
-        const r=(liveTemp-CURVE_DEF_TEMP[i])/(CURVE_DEF_TEMP[i+1]-CURVE_DEF_TEMP[i]);
+    for(let i=0;i<s.curveTemp.length-1;i++){
+      if(liveTemp>=s.curveTemp[i]&&liveTemp<s.curveTemp[i+1]){
+        const r=(liveTemp-s.curveTemp[i])/(s.curveTemp[i+1]-s.curveTemp[i]);
         fPct=s.curvePct[i]+r*(s.curvePct[i+1]-s.curvePct[i]);
       }
     }
@@ -866,8 +885,10 @@ function editPopupOpen(idx, svgX, svgY, s){
   const locked = s.curveLocked && s.curveLocked[idx];
 
   document.getElementById('editPopupLabel').textContent =
-    'Točka '+idx+' — '+CURVE_LABELS[idx]+' ('+CURVE_DEF_TEMP[idx]+'°C)';
+    'Točka '+idx+' — '+CURVE_LABELS[idx]+' ('+s.curveTemp[idx]+'°C)';
   document.getElementById('editPopupInput').value = s.curvePct[idx];
+  document.getElementById('editPopupTemp').value  = s.curveTemp[idx];
+  document.getElementById('editPopupErr').style.display = 'none';
   document.getElementById('editPopupLockWarn').textContent =
     locked ? '⚠ Točka zaklenjena — algoritem ne bo posodabljal' : '';
 
@@ -895,17 +916,37 @@ function editPopupClose(){
 
 function editPopupApply(){
   if(_editIdx < 0) return;
-  const val = parseInt(document.getElementById('editPopupInput').value);
-  if(isNaN(val)||val<0||val>100){
-    document.getElementById('editPopupInput').style.borderColor='#ff3b30';
-    return;
+  const pct  = parseInt(document.getElementById('editPopupInput').value);
+  const temp = parseFloat(document.getElementById('editPopupTemp').value);
+  const errEl = document.getElementById('editPopupErr');
+
+  if(isNaN(pct)||pct<0||pct>100||isNaN(temp)||temp<0||temp>80){
+    errEl.textContent='Neveljavna vrednost!';errEl.style.display='';return;
   }
-  const inp = document.getElementById('cp'+_editIdx);
-  if(inp) inp.value = val;
+  if(_curveData){
+    const temps = [..._curveData.curveTemp];
+    temps[_editIdx] = temp;
+    for(let i=0;i<temps.length-1;i++){
+      if(temps[i]+0.5>temps[i+1]){
+        errEl.textContent='Temperatura mora biti vsaj 0.5° nižja od naslednje točke!';
+        errEl.style.display='';return;
+      }
+    }
+  }
+
+  const inpPct  = document.getElementById('cp'+_editIdx);
+  const inpTemp = document.getElementById('ct'+_editIdx);
+  if(inpPct)  inpPct.value  = pct;
+  if(inpTemp) inpTemp.value = temp;
+
   const savedIdx = _editIdx;
   editPopupClose();
-  saveFan().then(()=>{
-    if(_curveData){ _curveData.curvePct[savedIdx]=val; drawFanCurveFromCache(); }
+  saveFan('msgF1').then(()=>{
+    if(_curveData){
+      _curveData.curvePct[savedIdx]  = pct;
+      _curveData.curveTemp[savedIdx] = temp;
+      drawFanCurveFromCache();
+    }
   });
 }
 
@@ -931,6 +972,26 @@ function drawFanCurveFromCache(){
 }
 
 // ── Fan nastavitve ─────────────────────────────────────────────────
+function onBoostLockChange(){
+  const locked = document.getElementById('bLock').checked;
+  const inp    = document.getElementById('bPct');
+  const badge  = document.getElementById('bPctConf');
+  if(locked){
+    inp.readOnly = false;
+    inp.style.borderColor = '#333';
+    inp.style.color = '#e0e0e0';
+    badge.textContent = 'LOCKED';
+    badge.style.background = '#ff950033';
+    badge.style.color = '#ff9500';
+  } else {
+    inp.readOnly = true;
+    inp.style.borderColor = '#ff950055';
+    inp.style.color = '#888';
+    badge.textContent = 'AUTO';
+    badge.style.background = '#00d4ff22';
+    badge.style.color = '#00d4ff';
+  }
+}
 async function loadFan(){
   try{
     const s=await(await fetch('/api/fansettings')).json();
@@ -958,26 +1019,55 @@ async function loadFan(){
       document.getElementById('bPct').value=s.boostPct;
       document.getElementById('bEval').value=s.boostEvalMin||2;
       document.getElementById('bLock').checked=s.boostLocked||false;
-      document.getElementById('bPctConf').textContent=s.boostLocked?'(zaklenjeno)':'(samo-kalibrirano)';
+      onBoostLockChange();
     }
     _curveData = s;
+    _lastCurveFanPct = JSON.stringify(s.curvePct);
+    _lastLiveTemp = null;
     drawFanCurveFromCache();
     _fL=true;
   }catch(e){}
 }
-async function saveFan(){
+async function saveFan(msgId='msgF5'){
   const ct=[0,1,2,3,4,5].map(i=>parseFloat(document.getElementById('ct'+i).value)||0);
   const cp=[0,1,2,3,4,5].map(i=>parseInt(document.getElementById('cp'+i).value)||0);
   const cl=[0,1,2,3,4,5].map(i=>document.getElementById('cl'+i).checked);
-  const b={curveTemp:ct,curvePct:cp,curveLocked:cl,fanMinPct:parseInt(document.getElementById('fMin').value)||0,fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,dndEnabled:document.getElementById('dndE').checked,dndFrom:parseInt(document.getElementById('dndF').value)||22,dndTo:parseInt(document.getElementById('dndT').value)||7,boostWattThreshold:parseFloat(document.getElementById('bWth').value)||10,boostPct:parseInt(document.getElementById('bPct').value)||20,boostLocked:document.getElementById('bLock').checked,boostEvalMin:parseInt(document.getElementById('bEval').value)||2};
+
+  for(let i=0;i<ct.length-1;i++){
+    if(ct[i]+0.5>ct[i+1]){
+      const m=document.getElementById(msgId);
+      m.textContent='Napaka: točka '+(i+1)+' mora biti vsaj 0.5° višja od točke '+i+'!';
+      m.style.color='#ff3b30';
+      setTimeout(()=>m.textContent='',5000);
+      return Promise.resolve();
+    }
+  }
+
+  const b={
+    curveTemp:ct,curvePct:cp,curveLocked:cl,
+    fanMinPct:parseInt(document.getElementById('fMin').value)||0,
+    fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,
+    dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,
+    dndEnabled:document.getElementById('dndE').checked,
+    dndFrom:parseInt(document.getElementById('dndF').value)||22,
+    dndTo:parseInt(document.getElementById('dndT').value)||7,
+    boostWattThreshold:parseFloat(document.getElementById('bWth').value)||10,
+    boostPct:parseInt(document.getElementById('bPct').value)||20,
+    boostLocked:document.getElementById('bLock').checked,
+    boostEvalMin:parseInt(document.getElementById('bEval').value)||2
+  };
   const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-  const m=document.getElementById('msgF');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
-  loadFan();
+  const m=document.getElementById(msgId);
+  m.textContent=r.ok?'Shranjeno!':'Napaka!';
+  m.style.color=r.ok?'#30d158':'#ff3b30';
+  setTimeout(()=>m.textContent='',3000);
+  if(r.ok) loadFan();
+  return r;
 }
 async function adaptReset(){
   if(!confirm('Ponastavi vse naučene vrednosti na default? Zaklepi ostanejo.'))return;
   const r=await fetch('/adapt/reset',{method:'POST'});
-  const m=document.getElementById('msgF');
+  const m=document.getElementById('msgF3');
   m.textContent=r.ok?'Ucenje ponastavljeno — default vrednosti aktivne':'Napaka!';
   m.style.color=r.ok?'#ff9500':'#ff3b30';
   setTimeout(()=>{m.textContent='';loadFan();},3000);
@@ -992,6 +1082,8 @@ async function loadCal(){
     document.getElementById('sOhm').value=s.shuntOhms;
     document.getElementById('cCorr').value=s.currentCorr;
     document.getElementById('wSsid').value=s.ssid;
+    document.getElementById('pwmFreq').value=s.fanPwmFreq||25000;
+    updatePwmInvUI(s.fanPwmInvert||false);
     _cL=true;
   }catch(e){}
 }
@@ -1019,6 +1111,40 @@ async function saveMon(){
   const b={monitorIp:document.getElementById('mIp').value,wattThreshold:parseFloat(document.getElementById('mWth').value)||3.0,ports};
   const r=await fetch('/save/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const m=document.getElementById('msgM');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
+}
+
+// ── PWM kalibracija ────────────────────────────────────────────────
+function updatePwmInvUI(inv){
+  const lbl=document.getElementById('pwmInvLabel'),
+        tog=document.getElementById('pwmInvToggle'),
+        tr=document.getElementById('pwmInvTrack'),
+        kn=document.getElementById('pwmInvKnob');
+  tog.checked=inv;
+  lbl.textContent=inv?'INVERT':'NORMAL';
+  lbl.style.color=inv?'#ff9500':'#30d158';
+  tr.style.background=inv?'#ff9500':'#2a2a2a';
+  kn.style.left=inv?'23px':'3px';
+}
+function onPwmInvToggle(){
+  updatePwmInvUI(document.getElementById('pwmInvToggle').checked);
+}
+async function savePwmCal(){
+  const freq=parseInt(document.getElementById('pwmFreq').value)||25000;
+  const inv=document.getElementById('pwmInvToggle').checked;
+  if(freq<10||freq>50000){
+    const m=document.getElementById('msgPwm');
+    m.textContent='Frekvenca mora biti med 10 in 50000 Hz!';
+    m.style.color='#ff3b30';
+    setTimeout(()=>m.textContent='',4000);
+    return;
+  }
+  const r=await fetch('/save/pwmcal',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fanPwmFreq:freq,fanPwmInvert:inv})});
+  const m=document.getElementById('msgPwm');
+  m.textContent=r.ok?'Shranjeno in aktivirano!':'Napaka!';
+  m.style.color=r.ok?'#30d158':'#ff3b30';
+  setTimeout(()=>m.textContent='',4000);
 }
 
 // ── LED toggle ─────────────────────────────────────────────────────
@@ -1108,6 +1234,7 @@ async function clearLog(){
 
 // ── Manual fan ─────────────────────────────────────────────────────
 function updateManUI(isMan,pct){
+  document.getElementById('manToggle').checked=isMan;
   const lbl=document.getElementById('modeLabel'),wrap=document.getElementById('manSliderWrap'),
         btn=document.getElementById('manApplyBtn'),knob=document.getElementById('manKnob'),
         track=document.getElementById('manSliderToggle');
@@ -1116,9 +1243,29 @@ function updateManUI(isMan,pct){
   if(pct!==undefined){document.getElementById('manPct').value=pct;document.getElementById('manPctVal').textContent=pct+'%';}
 }
 function onManToggle(){
-  const tog=document.getElementById('manToggle');tog.dataset.userEditing='1';updateManUI(tog.checked);
-  if(!tog.checked){fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({manual:false,pct:0})}).then(()=>{const m=document.getElementById('msgMan');m.textContent='Avtomatsko';m.style.color='#30d158';setTimeout(()=>{m.textContent='';delete tog.dataset.userEditing;},2000);});}
-  else{delete tog.dataset.userEditing;}
+  const tog=document.getElementById('manToggle');
+  const isOn=tog.checked;
+  updateManUI(isOn);
+  if(!isOn){
+    fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({manual:false,pct:0})})
+      .then(r=>{
+        const m=document.getElementById('msgMan');
+        m.textContent=r.ok?'Avtomatsko':'Napaka!';
+        m.style.color=r.ok?'#30d158':'#ff3b30';
+        setTimeout(()=>m.textContent='',2000);
+      });
+  } else {
+    const pct=parseInt(document.getElementById('manPct').value)||0;
+    fetch('/api/fan/manual',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({manual:true,pct:pct})})
+      .then(r=>{
+        const m=document.getElementById('msgMan');
+        m.textContent=r.ok?'Ročno — nastavljeno '+pct+'%':'Napaka!';
+        m.style.color=r.ok?'#ff6b00':'#ff3b30';
+        setTimeout(()=>m.textContent='',2000);
+      });
+  }
 }
 function onManSlider(){const v=document.getElementById('manPct').value;document.getElementById('manPctVal').textContent=v+'%';}
 async function applyManual(){
@@ -1401,12 +1548,14 @@ void initWebserver() {
 
     // --- GET /api/calsettings → za pre-fill Tab 2 ---
     server.on("/api/calsettings", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<256> doc;
+        StaticJsonDocument<384> doc;
         doc["tempOffset"]  = settings.tempOffset;
         doc["humOffset"]   = settings.humOffset;
         doc["shuntOhms"]   = settings.shuntOhms;
         doc["currentCorr"] = settings.currentCorr;
         doc["ssid"]        = settings.ssid;
+        doc["fanPwmFreq"]   = settings.fanPwmFreq;
+        doc["fanPwmInvert"] = settings.fanPwmInvert;
         String resp;
         serializeJson(doc, resp);
         request->send(200, "application/json", resp);
@@ -1667,11 +1816,6 @@ void initWebserver() {
         }
     );
 
-    // --- GET /update → OTA HTML ---
-    server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send_P(200, "text/html; charset=UTF-8", OTA_HTML);
-    });
-
     // --- POST /update → OTA flash (identično vent_SEW) ---
     server.on("/update", HTTP_POST,
         [](AsyncWebServerRequest *request){
@@ -1703,6 +1847,41 @@ void initWebserver() {
         }
     );
 
+    // --- POST /save/pwmcal → shrani PWM kalibracijo in takoj reinit ---
+    server.on("/save/pwmcal", HTTP_POST,
+        [](AsyncWebServerRequest *request){},
+        NULL,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+           size_t index, size_t total){
+            static char _pwmBuf[128];
+            static size_t _pwmLen = 0;
+            if (index == 0) { _pwmLen = 0; memset(_pwmBuf, 0, sizeof(_pwmBuf)); }
+            size_t cp = min(len, sizeof(_pwmBuf) - 1 - _pwmLen);
+            memcpy(_pwmBuf + _pwmLen, data, cp);
+            _pwmLen += cp;
+            if (index + len != total) return;
+
+            StaticJsonDocument<64> doc;
+            if (deserializeJson(doc, _pwmBuf)) {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            if (doc.containsKey("fanPwmFreq")) {
+                uint32_t v = (uint32_t)(unsigned long)doc["fanPwmFreq"];
+                if (v >= 10 && v <= 50000) settings.fanPwmFreq = v;
+            }
+            if (doc.containsKey("fanPwmInvert")) {
+                settings.fanPwmInvert = doc["fanPwmInvert"] | false;
+            }
+            saveSettings();
+            reinitFanPwm();
+            LOG_INFO("WEB", "/save/pwmcal — freq=%lu invert=%s",
+                     (unsigned long)settings.fanPwmFreq,
+                     settings.fanPwmInvert ? "ON" : "off");
+            request->send(200, "application/json", "{\"status\":\"OK\"}");
+        }
+    );
+
     // --- GET /api/led → vrni stanje LED ---
     server.on("/api/led", HTTP_GET, [](AsyncWebServerRequest *request){
         StaticJsonDocument<32> doc;
@@ -1718,10 +1897,15 @@ void initWebserver() {
         NULL,
         [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
            size_t index, size_t total){
-            static char _ledBuf[64];
+            static char*  _ledBuf = nullptr;
             static size_t _ledLen = 0;
-            if (index == 0) { _ledLen = 0; memset(_ledBuf, 0, sizeof(_ledBuf)); }
-            size_t cp = min(len, sizeof(_ledBuf) - 1 - _ledLen);
+            if (index == 0) {
+                if (!_ledBuf) _ledBuf = (char*)ps_malloc(256);
+                if (!_ledBuf) { request->send(500, "text/plain", "OOM"); return; }
+                _ledLen = 0;
+                memset(_ledBuf, 0, 256);
+            }
+            size_t cp = min(len, (size_t)(255 - _ledLen));
             memcpy(_ledBuf + _ledLen, data, cp);
             _ledLen += cp;
             if (index + len != total) return;
