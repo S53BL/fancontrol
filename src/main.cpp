@@ -7,6 +7,7 @@
 #include "config.h"
 #include "globals.h"
 #include "logging.h"
+#include "esp_task_wdt.h"
 #include "sensors.h"
 #include "fan.h"
 #include "display.h"
@@ -114,7 +115,21 @@ void setup() {
 
     Serial.println("=== Boot complete ===");
 
-    // 13. Kratek delay — WiFi/NTP/Weather stack se ustali
+    // 13. Hardware Watchdog — 120s, samo zaščita pred zamrznitvijo loopa
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms     = WDT_TIMEOUT_S * 1000UL,
+        .idle_core_mask = 0,
+        .trigger_panic  = true
+    };
+    esp_err_t wdt_err = esp_task_wdt_init(&wdt_config);
+    if (wdt_err == ESP_ERR_INVALID_STATE) {
+        esp_task_wdt_reconfigure(&wdt_config);
+    }
+    esp_task_wdt_add(NULL);
+    esp_task_wdt_reset();
+    LOG_INFO("WDT", "Task watchdog init OK — timeout %ds", WDT_TIMEOUT_S);
+
+    // 14. Kratek delay — WiFi/NTP/Weather stack se ustali
     if (!(sensorData.err & ERR_DISPLAY)) {
         LOG_INFO("BOOT", "Cakam 7s pred prvim display refresh...");
         delay(7000);
@@ -137,6 +152,7 @@ void setup() {
 }
 
 void loop() {
+    esp_task_wdt_reset(); // feed watchdog — prepreči 120s timeout reset
     unsigned long now = millis();
     static uint8_t lastSunDay = 0;
     static unsigned long lastSensorRetryMs  = 0;
@@ -187,13 +203,13 @@ void loop() {
         }
     }
 
-    // Shranjevanje v graf buffer
+    // Shranjevanje v graf buffer (10s interval)
     if (newSensorData && (now - lastGraphStoreMs >= GRAPH_STORE_INTERVAL)) {
         lastGraphStoreMs = now;
         newSensorData = false;
         GraphPoint pt;
         portENTER_CRITICAL(&dataMux);
-        pt.ts     = (uint32_t)time(nullptr);
+        pt.ts     = (uint32_t)UTC.now();
         pt.temp   = sensorData.temp;
         pt.hum    = sensorData.hum;
         pt.volt   = sensorData.volt;
@@ -201,11 +217,16 @@ void loop() {
         pt.fanPct = sensorData.fanPct;
         portEXIT_CRITICAL(&dataMux);
         graphAddPoint(pt);
-        monitorRun();
 
         // Peak temp tracker
         if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
             peakTemp = sensorData.temp;
+    }
+
+    // Server monitor — TCP port scan vsakih 5 min
+    if (now - lastMonitorMs >= MONITOR_RUN_INTERVAL) {
+        lastMonitorMs = now;
+        monitorRun();
     }
 
     // Dnevni recalc sunrise/sunset (enkrat na dan ob spremembi datuma)

@@ -31,9 +31,20 @@ struct SensorData {
     uint8_t  err;        // Bitmask napak (ErrorFlag)
 };
 
+// --- WiFi slot (runtime lista omrežij, 5 slotov) ---
+#define WIFI_SSID_MAX_LEN   32
+#define WIFI_PASS_MAX_LEN   64
+
+struct WifiSlot {
+    char ssid[WIFI_SSID_MAX_LEN];
+    char pass[WIFI_PASS_MAX_LEN];
+    bool enabled;
+    bool isPreset;  // true = factory default (iz wifi_config.h), false = ročni vnos
+};
+
 // --- Nastavitve (NVS) ---
 struct Settings {
-    // WiFi
+    // WiFi — legacy polje (za kompatibilnost, novo: wifiSlots[])
     char     ssid[32];
     char     password[64];
     // Temperaturna krivulja (6 točk)
@@ -82,6 +93,9 @@ struct Settings {
     // PWM kalibracija
     uint32_t fanPwmFreq;    // PWM frekvenca ventilatorja [Hz], privzeto 25000
     bool     fanPwmInvert;  // Invertiran delovni cikel (HIGH=stop, LOW=tece), privzeto false
+
+    // WiFi omrežja — runtime lista (5 slotov, NVS)
+    WifiSlot wifiSlots[WIFI_SLOT_COUNT];
 };
 
 // --- Watt Boost stanje (runtime, ne v NVS) ---
@@ -122,12 +136,18 @@ extern unsigned long lastGraphStoreMs;
 extern unsigned long lastDisplayRefreshMs;
 extern unsigned long lastWifiCheckMs;
 extern unsigned long lastNtpSyncMs;
+extern unsigned long lastMonitorMs;
 
 // Mutex za thread-safety (Core 0 = web, Core 1 = senzorji/fan)
 extern portMUX_TYPE dataMux;
 
 // Peak tracker (samo RAM, brez NVS)
 extern float peakTemp;    // Max temperatura od reseta
+
+// WiFi health tracking (RAM, ne NVS)
+extern uint8_t  wifiNtpFailCount;      // Zaporedne NTP sync napake
+extern uint32_t wifiLastRoamMs;        // millis() zadnjega roaming reconnecta
+extern uint32_t wifiLastReconnectMs;   // millis() zadnjega kateregakoli reconnecta
 
 // Vremenski podatki in timing
 extern WeatherData  weatherData;
@@ -138,4 +158,5 @@ void initGlobals();
 void loadSettings();
 void saveSettings();
 void resetSettings();
+void saveWifiSlots();
 

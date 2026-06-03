@@ -1,6 +1,7 @@
 // globals.cpp — Definicije globalnih spremenljivk in NVS upravljanje za fancontrol
 
 #include "globals.h"
+#include "wifi_config.h"
 
 // --- Senzorski podatki in nastavitve ---
 SensorData   sensorData;
@@ -18,6 +19,7 @@ bool newSensorData = false;
 // --- Timing ---
 unsigned long lastSensorReadMs     = 0;
 unsigned long lastGraphStoreMs     = 0;
+unsigned long lastMonitorMs        = 0;
 unsigned long lastDisplayRefreshMs = 0;
 unsigned long lastWifiCheckMs      = 0;
 unsigned long lastNtpSyncMs        = 0;
@@ -27,6 +29,11 @@ portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 
 // --- Peak tracker (samo RAM, brez NVS) ---
 float peakTemp = -999.0f;
+
+// --- WiFi health tracking (RAM, ne NVS) ---
+uint8_t  wifiNtpFailCount    = 0;
+uint32_t wifiLastRoamMs      = 0;
+uint32_t wifiLastReconnectMs = 0;
 
 // --- Vremenski podatki ---
 WeatherData  weatherData   = { 0.0f, 0, 0, false, false, 0, "--:--", "--:--" };
@@ -161,6 +168,28 @@ void resetSettings() {
 }
 
 // =============================================================================
+// SAVE WIFI SLOTS — shrani samo WiFi slote v NVS (ločeno od saveSettings)
+// =============================================================================
+void saveWifiSlots() {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, false);
+    for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+        char keySSID[12], keyPass[12], keyEn[10], keyPreset[12];
+        snprintf(keySSID,   sizeof(keySSID),   "ws%d_ssid",   i);
+        snprintf(keyPass,   sizeof(keyPass),   "ws%d_pass",   i);
+        snprintf(keyEn,     sizeof(keyEn),     "ws%d_en",     i);
+        snprintf(keyPreset, sizeof(keyPreset), "ws%d_preset", i);
+
+        prefs.putString(keySSID,   settings.wifiSlots[i].ssid);
+        prefs.putString(keyPass,   settings.wifiSlots[i].pass);
+        prefs.putBool(keyEn,       settings.wifiSlots[i].enabled);
+        prefs.putBool(keyPreset,   settings.wifiSlots[i].isPreset);
+    }
+    prefs.end();
+    Serial.println("[WiFi] Sloti shranjeni v NVS");
+}
+
+// =============================================================================
 // INIT GLOBALS
 // =============================================================================
 void initGlobals() {
@@ -189,6 +218,45 @@ void initGlobals() {
     sensorData.peakWatt = prefs.getFloat(PEAK_WATT_NVS_KEY, PEAK_WATT_DEFAULT);
     if (sensorData.peakWatt < PEAK_WATT_MIN_FLOOR) sensorData.peakWatt = PEAK_WATT_DEFAULT;
     prefs.end();
+
+    // WiFi sloti — inicializiraj iz NVS ali factory defaults
+    {
+        Preferences wPrefs;
+        wPrefs.begin(NVS_NAMESPACE, true);
+        for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+            char keySSID[12], keyPass[12], keyEn[10], keyPreset[12];
+            snprintf(keySSID,   sizeof(keySSID),   "ws%d_ssid",   i);
+            snprintf(keyPass,   sizeof(keyPass),   "ws%d_pass",   i);
+            snprintf(keyEn,     sizeof(keyEn),     "ws%d_en",     i);
+            snprintf(keyPreset, sizeof(keyPreset), "ws%d_preset", i);
+
+            String ssid = wPrefs.getString(keySSID, "");
+            if (ssid.length() > 0) {
+                // NVS vrednost obstaja — naloži
+                strncpy(settings.wifiSlots[i].ssid, ssid.c_str(), WIFI_SSID_MAX_LEN - 1);
+                settings.wifiSlots[i].ssid[WIFI_SSID_MAX_LEN - 1] = '\0';
+                String pass = wPrefs.getString(keyPass, "");
+                strncpy(settings.wifiSlots[i].pass, pass.c_str(), WIFI_PASS_MAX_LEN - 1);
+                settings.wifiSlots[i].pass[WIFI_PASS_MAX_LEN - 1] = '\0';
+                settings.wifiSlots[i].enabled  = wPrefs.getBool(keyEn, true);
+                settings.wifiSlots[i].isPreset = wPrefs.getBool(keyPreset, false);
+            } else if (i < WIFI_NETWORK_COUNT) {
+                // NVS prazen — naloži factory default iz wifi_config.h
+                strncpy(settings.wifiSlots[i].ssid, WIFI_SSID_LIST[i], WIFI_SSID_MAX_LEN - 1);
+                settings.wifiSlots[i].ssid[WIFI_SSID_MAX_LEN - 1] = '\0';
+                strncpy(settings.wifiSlots[i].pass, WIFI_PASS_LIST[i], WIFI_PASS_MAX_LEN - 1);
+                settings.wifiSlots[i].pass[WIFI_PASS_MAX_LEN - 1] = '\0';
+                settings.wifiSlots[i].enabled  = true;
+                settings.wifiSlots[i].isPreset = true;
+            } else {
+                // Prazen slot
+                memset(&settings.wifiSlots[i], 0, sizeof(WifiSlot));
+                settings.wifiSlots[i].enabled  = false;
+                settings.wifiSlots[i].isPreset = false;
+            }
+        }
+        wPrefs.end();
+    }
 
     Serial.println("[Globals] Init OK");
 }

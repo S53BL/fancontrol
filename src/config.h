@@ -83,7 +83,7 @@
 
 // --- Časovni intervali (ms) ---
 #define SENSOR_READ_INTERVAL    10000UL    // Branje senzorjev: 10 s
-#define GRAPH_STORE_INTERVAL    60000UL    // Shranjevanje v graf buffer: 60 s
+#define GRAPH_STORE_INTERVAL    10000UL    // Shranjevanje v graf buffer: 10 s
 // --- ePaper refresh strategija ---
 // Partial refresh (brez flasha) se sproži ob vsaki spremembi minute.
 // Periodični full refresh počisti ghosting ki se kopiči s partial osvežitvami.
@@ -109,7 +109,7 @@
 #define EPD_HEIGHT          296
 
 // --- Graf buffer (PSRAM) ---
-#define GRAPH_BUFFER_SIZE   10080   // 7 dni @ 1 točka/min (10080 min)
+#define GRAPH_BUFFER_SIZE   60480   // 7 dni @ 1 točka/10s (60480 točk)
 
 // --- Napake (bitmask) ---
 enum ErrorFlag : uint8_t {
@@ -132,13 +132,13 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.0.0"
+#define FW_VERSION          "1.1.0"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
 // Preveri schematic plošče — pogosta alternativa je GPIO21.
 #define PIN_RGB_LED         48      // Potrebno premostiti mosticek na PCB-ju, da se uporabi GPIO48 
-#define RGB_BRIGHTNESS      50      // 0–255, nizko da ne slepi
+#define LED_BRIGHTNESS      50      // 0–255, nizko da ne slepi
 
 // --- Boot ---
 #define BOOT_SERIAL_DELAY_MS   2000   // Čakanje po Serial.begin() za monitor
@@ -164,6 +164,7 @@ enum ErrorFlag : uint8_t {
 // --- Mini PC Monitor ---
 #define MONITOR_TCP_TIMEOUT_MS     500      // TCP connect timeout [ms]
 #define MONITOR_MAX_PORTS          9        // Max portov v nastavitvah (3x3 grid)
+#define MONITOR_RUN_INTERVAL       300000UL // Skeniranje portov: 5 min
 
 #define MONITOR_DEFAULT_IP         "192.168.2.5"
 #define MONITOR_DEFAULT_WATT_THR   3.0f     // Pod tem = Mini PC izklopljen [W]
@@ -177,3 +178,15 @@ enum ErrorFlag : uint8_t {
 #define MONITOR_PORT_5    993,  "IMAP-S",  true
 #define MONITOR_PORT_6    8443, "Webmail", true
 #define MONITOR_PORT_7    0,    "",        false  // opcijski slot
+
+// --- WiFi Intelligence ---
+#define WIFI_ROAM_INTERVAL_MS       5400000UL  // Periodični roaming reconnect: 90 minut
+#define WIFI_NTP_FAIL_THRESHOLD     3           // Consecutive NTP napake pred WiFi reconnectom
+#define WIFI_SCAN_HISTORY_SIZE      10          // Število shranjenih scan/reconnect eventov
+#define WIFI_SCAN_MAX_APS           20          // Max AP-jev v scan rezultatih
+
+// --- Hardware Watchdog ---
+#define WDT_TIMEOUT_S               120         // Task watchdog timeout [s]
+
+// --- WiFi omrežja ---
+#define WIFI_SLOT_COUNT             5           // Število WiFi slotov

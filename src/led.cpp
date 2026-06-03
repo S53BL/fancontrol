@@ -11,7 +11,7 @@ static Adafruit_NeoPixel _led(1, PIN_RGB_LED, NEO_GRB + NEO_KHZ800);
 
 void ledInit() {
     _led.begin();
-    _led.setBrightness(RGB_BRIGHTNESS);
+    _led.setBrightness(LED_BRIGHTNESS);
     _led.clear();
     _led.show();
 }
