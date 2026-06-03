@@ -6,22 +6,23 @@
 #include "fan_boost.h"
 #include <Arduino.h>
 
-static uint8_t _fanPct = 0;
-static bool    _manualMode = false;
-static uint8_t _manualPct  = 0;
+static uint8_t  _fanPct     = 0;
+static bool     _manualMode = false;
+static uint8_t  _manualPct  = 0;
+
+// Hysteresis state
+static bool     _fanRunning    = false;
+static bool     _kickActive    = false;
+static uint32_t _kickStartMs   = 0;
+static uint8_t  _kickTargetPct = 0;
 
 // --- Linearna interpolacija temperaturne krivulje ---
 // Vrne ciljni % (0–100) glede na temperaturo in settings.curveTemp/curvePct
 static uint8_t interpolateCurve(float temp) {
-    // Pod prvo točko → najnižji %
     if (temp <= settings.curveTemp[0])
         return settings.curvePct[0];
-
-    // Nad zadnjo točko → polna hitrost
     if (temp >= settings.curveTemp[FAN_CURVE_POINTS - 1])
         return settings.curvePct[FAN_CURVE_POINTS - 1];
-
-    // Poišči interval in linearna interpolacija
     for (int i = 0; i < FAN_CURVE_POINTS - 1; i++) {
         if (temp >= settings.curveTemp[i] && temp < settings.curveTemp[i + 1]) {
             float tSpan  = settings.curveTemp[i + 1] - settings.curveTemp[i];
@@ -33,29 +34,77 @@ static uint8_t interpolateCurve(float temp) {
     return settings.curvePct[FAN_CURVE_POINTS - 1];
 }
 
+// --- Hysteresis + startup kick state machine ---
+// Vrne dejanski user % z upoštevanjem hysteresis logike in startup kick.
+static uint8_t applyHysteresisAndKick(uint8_t requestedPct) {
+    uint32_t now = millis();
+
+    if (_kickActive) {
+        if (now - _kickStartMs >= FAN_KICK_MS) {
+            _kickActive = false;
+            LOG_INFO("FAN", "Kick koncan — spust na %d%%", _kickTargetPct);
+            return _kickTargetPct;
+        } else {
+            return settings.fanStartPct;
+        }
+    }
+
+    if (!_fanRunning) {
+        if (requestedPct >= settings.fanStartPct) {
+            _fanRunning    = true;
+            _kickActive    = true;
+            _kickStartMs   = now;
+            _kickTargetPct = requestedPct;
+            LOG_INFO("FAN", "Startup kick: %d%% -> %d%% (kick %lums)",
+                     requestedPct, settings.fanStartPct, (unsigned long)FAN_KICK_MS);
+            return settings.fanStartPct;
+        } else {
+            return 0;
+        }
+    } else {
+        if (requestedPct < settings.fanStopPct) {
+            _fanRunning = false;
+            LOG_INFO("FAN", "Hysteresis OFF: %d%% < stop=%d%%",
+                     requestedPct, settings.fanStopPct);
+            return 0;
+        } else {
+            return requestedPct;
+        }
+    }
+}
+
 // --- Inicializacija ---
 void initFan() {
-    // IDF 5.x API: ledcAttach(pin, freq, resolution) — channel se dodeli avtomatsko
     uint32_t freq = (settings.fanPwmFreq >= 10 && settings.fanPwmFreq <= 50000)
                     ? settings.fanPwmFreq : FAN_PWM_FREQ;
     ledcAttach(PIN_FAN_PWM, freq, FAN_PWM_RESOLUTION);
-    // Zaščita: ne izklopimo ventilatorja ob zagonu
-    setFanPct(settings.fanMinPct);
-    LOG_INFO("FAN", "Init OK — min %d%%", settings.fanMinPct);
+
+    _fanRunning  = false;
+    _kickActive  = false;
+    _kickStartMs = 0;
+
+    setFanPct(0);
+    LOG_INFO("FAN", "Init OK — start=%d%% stop=%d%% kick=%lums",
+             settings.fanStartPct, settings.fanStopPct, (unsigned long)FAN_KICK_MS);
 }
 
-// --- Direktna nastavitev hitrosti [0–100%] ---
+// --- Direktna nastavitev hitrosti [user 0–100%] → PWM ---
+// 0% user = 0% PWM (ugasnjen)
+// 1–100% user = 27–100% PWM (linearna preslikava na fizični razpon)
 void setFanPct(uint8_t pct) {
-    // Upoštevaj konfigurirani minimum
-    pct = max(pct, settings.fanMinPct);
     pct = constrain(pct, 0, 100);
     _fanPct = pct;
 
     uint8_t duty;
-    if (settings.fanPwmInvert) {
-        duty = (uint8_t)map(pct, 0, 100, FAN_PWM_MAX, FAN_PWM_MIN);
+    if (pct == 0) {
+        duty = 0;
     } else {
-        duty = (uint8_t)map(pct, 0, 100, FAN_PWM_MIN, FAN_PWM_MAX);
+        float pwmPct = 27.0f + (float)(pct - 1) * 73.0f / 99.0f;
+        if (settings.fanPwmInvert) {
+            duty = (uint8_t)map((long)pwmPct, 0, 100, FAN_PWM_MAX, FAN_PWM_MIN);
+        } else {
+            duty = (uint8_t)(pwmPct / 100.0f * FAN_PWM_MAX + 0.5f);
+        }
     }
     ledcWrite(PIN_FAN_PWM, duty);
 
@@ -66,7 +115,7 @@ void setFanPct(uint8_t pct) {
 
 uint8_t getFanPct() { return _fanPct; }
 
-// --- Reinit PWM ob spremembi frekvence ali invert (brez reseta) ---
+// --- Reinit PWM ob spremembi frekvence ali invert (brez reseta hysteresis state) ---
 void reinitFanPwm() {
     uint32_t freq = (settings.fanPwmFreq >= 10 && settings.fanPwmFreq <= 50000)
                     ? settings.fanPwmFreq : FAN_PWM_FREQ;
@@ -80,17 +129,14 @@ void reinitFanPwm() {
 // --- DND (nočni tihi način) ---
 bool isDndActive() {
     if (!settings.dndEnabled) return false;
-    // Brez sinhroniziranega časa ne aktiviramo DND
     if (!timeSynced) return false;
 
     int h = (int)myTZ.hour();
     bool active;
 
     if (settings.dndFrom > settings.dndTo) {
-        // Čez polnoč: npr. 22–07
         active = (h >= settings.dndFrom) || (h < settings.dndTo);
     } else {
-        // Isti dan: npr. 08–20
         active = (h >= settings.dndFrom) && (h < settings.dndTo);
     }
 
@@ -103,37 +149,32 @@ bool isDndActive() {
 
 // --- Posodobitev hitrosti ventilatorja (klic iz loop) ---
 void updateFan() {
-    // Ročni način — preskoči krivuljo in DND popolnoma
     if (_manualMode) {
-        setFanPct(_manualPct);
-        LOG_INFO("FAN", "ROCNO %d%%", _manualPct);
+        uint8_t actualPct = applyHysteresisAndKick(_manualPct);
+        setFanPct(actualPct);
+        LOG_INFO("FAN", "ROCNO req=%d%% actual=%d%% running=%s",
+                 _manualPct, actualPct, _fanRunning ? "ON" : "OFF");
         return;
     }
 
-    // Preberi temperaturo pod mutex zaščito
     float temp;
     portENTER_CRITICAL(&dataMux);
     temp = sensorData.temp;
     portEXIT_CRITICAL(&dataMux);
 
-    // Senzor ne deluje → minimalna varnostna hitrost
     if (temp == ERR_FLOAT) {
-        setFanPct(settings.fanMinPct);
+        // Senzor ne deluje → varnostna vrednost nad stop pragom
+        uint8_t actualPct = applyHysteresisAndKick(settings.fanStartPct);
+        setFanPct(actualPct);
         return;
     }
 
-    // Izračunaj ciljni % iz temperaturne krivulje
     uint8_t pct = interpolateCurve(temp);
 
-    // DND korekcija — omeji maksimum (samo v avtomatskem načinu)
     if (isDndActive()) {
         pct = min(pct, settings.dndMaxPct);
     }
 
-    // Minimum
-    pct = max(pct, settings.fanMinPct);
-
-    // Watt feed-forward boost — prištej boost% (0 če ni aktiven)
     float wattNow;
     portENTER_CRITICAL(&dataMux);
     wattNow = sensorData.watt;
@@ -146,9 +187,12 @@ void updateFan() {
         pct = boosted;
     }
 
-    setFanPct(pct);
-    LOG_INFO("FAN", "T=%.1f C -> %d%% boost=%d%% DND=%s",
-             temp, pct, extra, sensorData.dndActive ? "ON" : "off");
+    uint8_t actualPct = applyHysteresisAndKick(pct);
+    setFanPct(actualPct);
+    LOG_INFO("FAN", "T=%.1f C -> req=%d%% actual=%d%% boost=%d%% running=%s DND=%s",
+             temp, pct, actualPct, extra,
+             _fanRunning ? "ON" : "OFF",
+             sensorData.dndActive ? "ON" : "off");
 
     adaptUpdate(temp, pct);
 }
@@ -165,10 +209,12 @@ void setManualMode(bool enabled, uint8_t pct) {
 
     if (enabled) {
         LOG_INFO("FAN", "Rocni nacin ON — %d%%", _manualPct);
+        uint8_t actualPct = applyHysteresisAndKick(_manualPct);
+        setFanPct(actualPct);
     } else {
         LOG_INFO("FAN", "Rocni nacin OFF — vrni na avto");
+        updateFan();
     }
-    updateFan();
 }
 
 bool isManualMode() {

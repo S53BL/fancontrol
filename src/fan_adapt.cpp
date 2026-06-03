@@ -100,7 +100,7 @@ void adaptUpdate(float temp, uint8_t fanPct) {
 
     float oldPct = (float)settings.curvePct[zone];
     float newPct = oldPct + ADAPT_EMA_ALPHA * ((float)fanPct - oldPct);
-    newPct = fmaxf(newPct, (float)settings.fanMinPct);
+    newPct = fmaxf(newPct, 0.0f);
     newPct = fminf(newPct, 100.0f);
     uint8_t newPctInt = (uint8_t)(newPct + 0.5f);
 

@@ -76,49 +76,119 @@ struct WifiApInfo {
 static WifiApInfo wifiScanResults[WIFI_SCAN_MAX_APS];
 static uint8_t    wifiScanResultCount = 0;
 static uint32_t   wifiLastScanMs      = 0;
-static volatile bool wifiScanRequested  = false;
-static volatile bool wifiScanInProgress = false;
+static volatile bool wifiScanRequested    = false;
+static volatile bool wifiScanInProgress   = false;
+static volatile bool wifiConnectRequested = false;
+static char          wifiConnectTarget[32] = "";
 
-// Skupna logika shranjevanja scan rezultatov
-static void wifiStoreScanResults(int n) {
+static void connectWiFi();  // forward — definicija pozneje v datoteki
+static void syncNTP();      // forward — definicija pozneje v datoteki
+
+// Poveži na specifičen SSID iz slota; ob neuspehu fallback na normalni connectWiFi()
+static void wifiConnectToSSID(const char* targetSSID) {
+    const char* pass = nullptr;
+    for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+        if (settings.wifiSlots[i].enabled &&
+            strcmp(settings.wifiSlots[i].ssid, targetSSID) == 0) {
+            pass = settings.wifiSlots[i].pass;
+            break;
+        }
+    }
+    if (!pass) {
+        LOG_WARN("WIFI", "ConnectTo: '%s' ni v slotih", targetSSID);
+        return;
+    }
+    LOG_INFO("WIFI", "ConnectTo: '%s'", targetSSID);
+    int rssiPre = WiFi.RSSI();
+    WiFi.disconnect();
+    delay(500);
+    WiFi.begin(targetSSID, pass);
+    unsigned long t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < 12000) delay(300);
+    if (WiFi.status() == WL_CONNECTED) {
+        MDNS.end(); MDNS.begin(MDNS_HOSTNAME);
+        if (!timeSynced) syncNTP();
+        wifiScanHistoryAdd(WIFI_EVENT_MANUAL,
+                           WiFi.SSID().c_str(), WiFi.BSSIDstr().c_str(),
+                           rssiPre, WiFi.RSSI());
+        LOG_INFO("WIFI", "ConnectTo OK: '%s' %d dBm", targetSSID, WiFi.RSSI());
+    } else {
+        LOG_WARN("WIFI", "ConnectTo NEUSPELO — fallback reconnect...");
+        connectWiFi();
+        if (WiFi.status() == WL_CONNECTED) {
+            MDNS.end(); MDNS.begin(MDNS_HOSTNAME);
+            if (!timeSynced) syncNTP();
+        }
+    }
+}
+
+// Scan po posameznih kanalih — workaround za ESP-IDF bug kjer rec->primary
+// vedno vrne connected channel namesto dejanskega kanala AP-ja.
+// Kanal dobi iz scan config (ch), ne iz wifi_ap_record_t.primary.
+static void wifiDoScan() {
     wifiScanResultCount = 0;
     wifiLastScanMs = millis();
-    if (n <= 0) { WiFi.scanDelete(); return; }
     String connectedBSSID = WiFi.BSSIDstr();
-    int cnt = min(n, (int)WIFI_SCAN_MAX_APS);
-    for (int i = 0; i < cnt; i++) {
-        WifiApInfo& ap = wifiScanResults[wifiScanResultCount++];
-        strncpy(ap.ssid,  WiFi.SSID(i).c_str(),     31); ap.ssid[31]  = '\0';
-        strncpy(ap.bssid, WiFi.BSSIDstr(i).c_str(), 17); ap.bssid[17] = '\0';
-        ap.rssi        = (int8_t)WiFi.RSSI(i);
-        ap.channel     = (uint8_t)WiFi.channel(i);
-        ap.isConnected = (WiFi.BSSIDstr(i) == connectedBSSID);
+    char bssidStr[18];
+
+    for (uint8_t ch = 1; ch <= 13; ch++) {
+        int n = WiFi.scanNetworks(false, true, false, 150, ch);
+        if (n <= 0) { WiFi.scanDelete(); continue; }
+        for (int i = 0; i < n && wifiScanResultCount < WIFI_SCAN_MAX_APS; i++) {
+            wifi_ap_record_t *rec = (wifi_ap_record_t*)WiFi.getScanInfoByIndex(i);
+            if (!rec) continue;
+            snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     rec->bssid[0], rec->bssid[1], rec->bssid[2],
+                     rec->bssid[3], rec->bssid[4], rec->bssid[5]);
+            // Dedupliciraj — isti AP vidno na sosednjih kanalih (RF overlap 2.4GHz)
+            bool dup = false;
+            for (int j = 0; j < wifiScanResultCount; j++) {
+                if (strcmp(wifiScanResults[j].bssid, bssidStr) == 0) {
+                    if (rec->rssi > wifiScanResults[j].rssi) {
+                        wifiScanResults[j].rssi    = rec->rssi;
+                        wifiScanResults[j].channel = ch;
+                    }
+                    dup = true; break;
+                }
+            }
+            if (!dup) {
+                WifiApInfo& ap = wifiScanResults[wifiScanResultCount++];
+                strncpy(ap.ssid, (const char*)rec->ssid, 31); ap.ssid[31] = '\0';
+                strncpy(ap.bssid, bssidStr, 17); ap.bssid[17] = '\0';
+                ap.rssi        = rec->rssi;
+                ap.channel     = ch;
+                ap.isConnected = (strcmp(bssidStr, connectedBSSID.c_str()) == 0);
+            }
+        }
+        WiFi.scanDelete();
     }
-    WiFi.scanDelete();
+    LOG_INFO("WIFI", "Scan done: %d AP-jev", wifiScanResultCount);
+    for (int i = 0; i < wifiScanResultCount; i++)
+        LOG_INFO("WIFI", "  [%d] %-20s ch=%2d %4d dBm", i, wifiScanResults[i].ssid,
+                 wifiScanResults[i].channel, wifiScanResults[i].rssi);
 }
 
-// Sync scan — kliči SAMO med reconnectom (blokira ~1-3s)
-static void wifiDoScan() {
-    int n = WiFi.scanNetworks(false, true);  // sync, pokaži skrite
-    wifiStoreScanResults(n);
-    LOG_INFO("WIFI", "Scan: %d AP-jev najdenih", wifiScanResultCount);
-}
-
-// Async scan — sproži iz UI (ne blokira AsyncWebServer)
-static void wifiStartAsyncScan() {
-    WiFi.scanNetworks(true, true);  // async, pokaži skrite
-    wifiScanInProgress = true;
-    LOG_INFO("WIFI", "Async scan sproščen...");
-}
-
-// Kliči v vsakem handleWebserver() ciklu
-static void wifiPollAsyncScan() {
-    if (!wifiScanInProgress) return;
-    int n = WiFi.scanComplete();
-    if (n == WIFI_SCAN_RUNNING) return;
-    wifiScanInProgress = false;
-    wifiStoreScanResults(n);
-    LOG_INFO("WIFI", "Async scan done: %d AP-jev", wifiScanResultCount);
+// UI scan: disconnect → scan → reconnect (edina metoda za pravilne kanale)
+// Kliči iz handleWebserver() — blokira main loop ~5-7s, ne AsyncWebServer
+static void wifiUiScanAndReconnect() {
+    LOG_INFO("WIFI", "UI scan: disconnect → scan → reconnect...");
+    int rssiPre = WiFi.RSSI();
+    WiFi.disconnect();
+    delay(300);
+    wifiDoScan();
+    connectWiFi();
+    if (WiFi.status() == WL_CONNECTED) {
+        MDNS.end();
+        MDNS.begin(MDNS_HOSTNAME);
+        wifiScanHistoryAdd(WIFI_EVENT_MANUAL,
+                           WiFi.SSID().c_str(), WiFi.BSSIDstr().c_str(),
+                           rssiPre, WiFi.RSSI());
+        LOG_INFO("WIFI", "UI scan done: %d AP-jev, reconnect OK %d dBm",
+                 wifiScanResultCount, WiFi.RSSI());
+    } else {
+        LOG_WARN("WIFI", "UI scan done: %d AP-jev, reconnect NEUSPEŠEN",
+                 wifiScanResultCount);
+    }
 }
 
 // =====================================================================
@@ -437,7 +507,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button class="btn bsm" id="btnLive" onclick="gotoLive()" style="background:#30d158;color:#0d0d0d">LIVE</button>
       <button class="btn bsm" id="btnReset" onclick="resetGraph()">RESET</button>
-      <a class="btn bsm" href="/api/history/csv" download style="text-decoration:none;background:#555;color:#e0e0e0">&#11015; CSV</a>
+      <button class="btn bsm" onclick="downloadCSV()" style="background:#555;color:#e0e0e0">&#11015; CSV</button>
     </div>
   </div>
   <!-- Vrstica 2: period gumbi -->
@@ -600,9 +670,13 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </div>
 <!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
-<div class="fr"><label>Min hitrost [%]</label><input type="number" id="fMin" min="0" max="100" style="width:70px"></div>
+<div class="fr"><label>Zagon ventilatorja [%]</label><input type="number" id="fanStartPct" min="1" max="100" style="width:70px"></div>
+<div class="fr"><label>Izklop ventilatorja [%]</label><input type="number" id="fanStopPct" min="0" max="99" style="width:70px"></div>
 <div class="fr"><label>Max podnevi [%]</label><input type="number" id="fMaxD" min="0" max="100" style="width:70px"></div>
-<div class="fr"><label>Max DND [%]</label><input type="number" id="fDndM" min="0" max="100" style="width:70px"></div>
+<div class="fr"><label>Max DND [%]</label><input type="number" id="fDndM" min="0" max="100" step="1" style="width:70px"></div>
+<div style="font-size:10px;color:#555;margin-bottom:8px;margin-left:180px">
+  0% = fan ugasnjen med DND &nbsp;|&nbsp; ali vsaj toliko kot prag zagona
+</div>
 <div class="fr"><label>DND omogočen</label><input type="checkbox" id="dndE"></div>
 <div class="fr"><label>DND od ure (0–23)</label><input type="number" id="dndF" min="0" max="23" style="width:70px"></div>
 <div class="fr"><label>DND do ure (0–23)</label><input type="number" id="dndT" min="0" max="23" style="width:70px"></div>
@@ -683,7 +757,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
       <h3>RAM Log
         &nbsp;<button class="btn bsm" onclick="fetchLog()">Osveži</button>
         &nbsp;<button class="btn bsm bto" onclick="clearLog()">Počisti</button>
-        &nbsp;<a class="btn bsm" href="/api/log/download" download style="text-decoration:none">Download</a>
+        &nbsp;<button class="btn bsm" onclick="downloadLog()" style="background:#555;color:#e0e0e0">&#11015; Download</button>
       </h3>
       <div class="logflt">
         <label><input type="checkbox" id="fInfo" checked onchange="applyLogFilter()"> <span style="color:#888">INFO</span></label>
@@ -719,6 +793,13 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
       <button class="btn bto" onclick="doRestart()">&#128260; Ponovni zagon</button>
       <span class="msg" id="msgRestart"></span>
     </div>
+    <!-- Ponastavitev nastavitev -->
+    <div class="sec" style="margin-top:12px;border:1px solid #3a1a1a;border-radius:6px;padding:12px">
+      <h3 style="color:#ff3b30">Ponastavitev nastavitev</h3>
+      <p style="font-size:11px;color:#555;margin-bottom:12px">Izbriše vse shranjene nastavitve (krivulja, kalibracija, DND, Boost...) in zapiše privzete vrednosti. WiFi nastavitve ostanejo. Naprava se samodejno restartira.</p>
+      <button class="btn bto" style="border-color:#ff3b30;color:#ff3b30" onclick="doSettingsReset()">&#9888; Ponastavi na privzete vrednosti</button>
+      <span class="msg" id="msgSettingsReset"></span>
+    </div>
   </div>
 </div>
 </div>
@@ -729,7 +810,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <!-- Razdelek 1: Trenutno stanje + Bar Chart -->
 <div class="sec">
   <h3>WIFI STANJE
-    &nbsp;<button class="btn bsm" onclick="wifiScanNow(this)">Skeniraj zdaj</button>
+    &nbsp;<button class="btn bsm" onclick="wifiScanNow(this)" title="Kratka prekinitev ~6s (disconnect→scan→reconnect)">Skeniraj zdaj</button>
     &nbsp;<button class="btn bsm bto" onclick="wifiReconnectNow()">Reconnect</button>
   </h3>
   <div id="wifiCurrentInfo" style="margin-bottom:12px">
@@ -821,6 +902,11 @@ async function refreshData(){
     if(bEl){
       if(d.boost_active){bEl.textContent='AKTIVEN +'+d.boost_pct+'%';bEl.style.color='#ff9500';}
       else{bEl.textContent='neaktiven';bEl.style.color='#555';}
+    }
+    if(d.boost_pct !== undefined){
+      if(_curveData) _curveData.boostPct = d.boost_pct;
+      const bPctEl=document.getElementById('bPct');
+      if(bPctEl && bPctEl.readOnly) bPctEl.value=d.boost_pct;
     }
     if(atab===1 && _curveData){
       const liveTemp = parseFloat(document.getElementById('ct').textContent) || null;
@@ -1180,7 +1266,7 @@ setInterval(refreshMonitor,300000);refreshMonitor();
 // ══════════════════════════════════════════════════════════════════
 
 const CURVE_DEF_TEMP = [30, 38, 45, 52, 58, 65];
-const CURVE_DEF_PCT  = [15, 25, 45, 65, 85, 100];
+const CURVE_DEF_PCT  = [0, 0, 3, 20, 50, 100];
 const CURVE_LABELS   = ['Mirovanje','Lahka obremenitev','Zmerna obremenitev',
                         'Višja obremenitev','Visoka obremenitev','Maksimum'];
 
@@ -1446,7 +1532,8 @@ async function loadFan(){
         el.style.color=conf>=thresh?'#30d158':'#555';
       }
     }
-    document.getElementById('fMin').value=s.fanMinPct;
+    document.getElementById('fanStartPct').value=s.fanStartPct;
+    document.getElementById('fanStopPct').value=s.fanStopPct;
     document.getElementById('fMaxD').value=s.fanMaxDayPct;
     document.getElementById('fDndM').value=s.dndMaxPct;
     document.getElementById('dndE').checked=s.dndEnabled;
@@ -1484,9 +1571,10 @@ async function saveFan(msgId='msgF5'){
 
   const b={
     curveTemp:ct,curvePct:cp,curveLocked:cl,
-    fanMinPct:parseInt(document.getElementById('fMin').value)||0,
+    fanStartPct:parseInt(document.getElementById('fanStartPct').value)||33,
+    fanStopPct:parseInt(document.getElementById('fanStopPct').value)||27,
     fanMaxDayPct:parseInt(document.getElementById('fMaxD').value)||100,
-    dndMaxPct:parseInt(document.getElementById('fDndM').value)||30,
+    dndMaxPct:parseInt(document.getElementById('fDndM').value)||0,
     dndEnabled:document.getElementById('dndE').checked,
     dndFrom:parseInt(document.getElementById('dndF').value)||22,
     dndTo:parseInt(document.getElementById('dndT').value)||7,
@@ -1495,6 +1583,15 @@ async function saveFan(msgId='msgF5'){
     boostLocked:document.getElementById('bLock').checked,
     boostEvalMin:parseInt(document.getElementById('bEval').value)||2
   };
+  const dndMax = parseInt(document.getElementById('fDndM').value) || 0;
+  const fanStart = parseInt(document.getElementById('fanStartPct').value) || 33;
+  if (dndMax > 0 && dndMax < fanStart) {
+    const m = document.getElementById(msgId);
+    m.textContent = 'DND max mora biti 0% ali vsaj ' + fanStart + '%!';
+    m.style.color = '#ff3b30';
+    setTimeout(() => m.textContent = '', 5000);
+    return Promise.resolve();
+  }
   const r=await fetch('/save/fan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const m=document.getElementById(msgId);
   m.textContent=r.ok?'Shranjeno!':'Napaka!';
@@ -1541,6 +1638,17 @@ async function doRestart(){
     setTimeout(()=>location.reload(),6000);
   }catch(e){m.textContent='Napaka!';m.style.color='#ff3b30';}
 }
+async function doSettingsReset(){
+  if(!confirm('POZOR: Vse nastavitve (krivulja, kalibracija, DND, Boost...) bodo ponastavljene na privzete vrednosti!\nWiFi nastavitve ostanejo.\n\nNadaljujem?'))return;
+  const m=document.getElementById('msgSettingsReset');
+  try{
+    const r=await fetch('/api/settings/reset',{method:'POST'});
+    if(r.ok){
+      m.textContent='Ponastavljeno! Naprava se restartira...';m.style.color='#ff9500';
+      setTimeout(()=>location.reload(),6000);
+    }else{m.textContent='Napaka!';m.style.color='#ff3b30';}
+  }catch(e){m.textContent='Napaka!';m.style.color='#ff3b30';}
+}
 
 // ── WiFi Tab ───────────────────────────────────────────────────────
 let _wifiSlots=[];
@@ -1557,7 +1665,7 @@ async function loadWifiStatus(){
     document.getElementById('wCurrentBssid').textContent=d.connected?d.bssid:'--';
     document.getElementById('wCurrentCh').textContent=d.connected?d.channel:'--';
     document.getElementById('wCurrentRssi').textContent=d.connected?(d.rssi+' dBm'):'--';
-    const sc=d.last_scan_s?Math.round(d.last_scan_s/60)+' min nazaj':'nikoli';
+    const sc=!d.last_scan_s?'nikoli':d.last_scan_s<60?(d.last_scan_s+'s nazaj'):(Math.round(d.last_scan_s/60)+' min nazaj');
     document.getElementById('wLastScan').textContent=sc;
     if(d.aps&&d.aps.length>0)renderWifiBarChart(d.aps);
   }catch(e){}
@@ -1596,23 +1704,62 @@ function renderWifiBarChart(aps){
   const barW=W-padL-padR;
   function rssiColor(r){return r>=-65?'#30d158':r>=-80?'#ff9500':'#ff3b30';}
   function rssiPct(r){return Math.max(0,Math.min(1,(r-rssiMin)/(rssiMax-rssiMin)));}
+  // Znani SSID-ji iz slotov (imajo geslo)
+  const knownSsids=new Set(_wifiSlots.filter(s=>s.enabled&&s.ssid).map(s=>s.ssid));
   let svg=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">`;
   aps.forEach((ap,i)=>{
     const y=padT+i*rowH;
     const bw=rssiPct(ap.rssi)*barW;
     const col=rssiColor(ap.rssi);
     const con=ap.isConnected;
-    if(con)svg+=`<rect x="0" y="${y+1}" width="${W}" height="${rowH-2}" fill="#00d4ff0a" rx="3"/>`;
-    const lbl=(ap.ssid||'(skrit)').substring(0,20);
-    svg+=`<text x="${padL-8}" y="${y+14}" text-anchor="end" fill="${con?'#00d4ff':'#aaa'}" font-size="11" font-family="monospace" font-weight="${con?'bold':'normal'}">${lbl}</text>`;
-    svg+=`<text x="${padL-8}" y="${y+27}" text-anchor="end" fill="#3a3a3a" font-size="9" font-family="monospace">${ap.bssid}</text>`;
+    const known=knownSsids.has(ap.ssid)&&!con;
+    if(con) svg+=`<rect x="0" y="${y+1}" width="${W}" height="${rowH-2}" fill="#00d4ff0a" rx="3"/>`;
+    else if(known) svg+=`<rect x="0" y="${y+1}" width="${W}" height="${rowH-2}" fill="#30d1580a" rx="3"/>`;
+    if(known) svg+=`<rect x="0" y="${y+4}" width="3" height="${rowH-8}" fill="#30d158" rx="1"/>`;
+    const lbl=(ap.ssid||'(skrit)').substring(0,18);
+    svg+=`<text x="8" y="${y+14}" text-anchor="start" fill="${con?'#00d4ff':known?col:'#555'}" font-size="11" font-family="monospace" font-weight="${con||known?'bold':'normal'}">${lbl}</text>`;
+    svg+=`<text x="8" y="${y+27}" text-anchor="start" fill="#3a3a3a" font-size="9" font-family="monospace">${ap.bssid}</text>`;
     svg+=`<rect x="${padL}" y="${y+10}" width="${Math.max(2,bw)}" height="${rowH-20}" fill="${col}" rx="2" opacity="${con?'1':'0.7'}"/>`;
     svg+=`<text x="${padL+bw+6}" y="${y+rowH/2+4}" fill="${col}" font-size="10" font-family="monospace">${ap.rssi} dBm</text>`;
     svg+=`<text x="${W-4}" y="${y+14}" text-anchor="end" fill="#555" font-size="9" font-family="monospace">ch${ap.channel}</text>`;
-    if(con)svg+=`<text x="${padL-14}" y="${y+14}" fill="#00d4ff" font-size="10">&#9679;</text>`;
+    if(con) svg+=`<text x="${padL-6}" y="${y+14}" text-anchor="end" fill="#00d4ff" font-size="10">&#9679;</text>`;
+    // → pomeni: znan SSID, dvoklikni za povezavo
+    if(known) svg+=`<text x="${padL-6}" y="${y+14}" text-anchor="end" fill="${col}" font-size="11">&#8594;</text>`;
+    // Overlay ZADNJI — data-connect (ne ondblclick!) ker inline SVG handlerji ne delujejo z innerHTML
+    if(known){
+      const ssidSafe=ap.ssid.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      svg+=`<rect x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent" pointer-events="all" style="cursor:pointer" data-connect="${ssidSafe}"/>`;
+    }
   });
   svg+='</svg>';
   wrap.innerHTML=svg;
+  // addEventListener po innerHTML — edina zanesljiva metoda za SVG v HTML kontekstu
+  wrap.querySelectorAll('[data-connect]').forEach(el=>{
+    el.addEventListener('dblclick',()=>wifiConnectTo(el.getAttribute('data-connect')));
+  });
+}
+
+async function wifiConnectTo(ssid){
+  if(!confirm(`Poveži na "${ssid}"?\n(~12s prekinitve, ob neuspehu se samodejno vrne)`))return;
+  const wrap=document.getElementById('wifiBarChart');
+  const orig=wrap?wrap.innerHTML:'';
+  if(wrap)wrap.innerHTML='<div style="padding:12px;color:#ff9500;font-family:monospace;font-size:11px">Vzpostavljam povezavo...</div>';
+  try{
+    const r=await fetch('/api/wifi/connect?ssid='+encodeURIComponent(ssid),{method:'POST'});
+    if(!r.ok){if(wrap)wrap.innerHTML=orig;return;}
+    // Poll dokler connect ne konča (max 18s)
+    for(let i=0;i<36;i++){
+      await new Promise(r=>setTimeout(r,500));
+      try{
+        const d=await(await fetch('/api/wifi/status')).json();
+        if(!d.scan_in_progress){await loadWifi();return;}
+      }catch(_){}
+    }
+  }catch(e){
+    // Prekinitev med connectom — čakamo 10s in osvežimo
+    await new Promise(r=>setTimeout(r,10000));
+    try{await loadWifi();}catch(_){}
+  }
 }
 
 function renderWifiSlots(slots){
@@ -1696,8 +1843,8 @@ async function wifiScanNow(btn){
   if(btn){btn.textContent='Skeniranje...';btn.disabled=true;}
   try{
     await fetch('/api/wifi/scan',{method:'POST'});
-    // Poll dokler scan ne konča (max 8s, vsake 500ms)
-    for(let i=0;i<16;i++){
+    // Poll dokler scan ne konča (max 15s — disconnect+scan+reconnect ~6-7s)
+    for(let i=0;i<30;i++){
       await new Promise(r=>setTimeout(r,500));
       try{
         const d=await(await fetch('/api/wifi/status')).json();
@@ -1705,8 +1852,8 @@ async function wifiScanNow(btn){
       }catch(_){}
     }
   }catch(e){
-    // TCP je padel med scanom — počakamo in poskusimo osvežiti
-    await new Promise(r=>setTimeout(r,3000));
+    // TCP je padel med scanom (pričakovano ~6s) — počakamo in osvežimo
+    await new Promise(r=>setTimeout(r,8000));
     try{await loadWifiStatus();}catch(_){}
   }
   if(btn){btn.textContent=orig;btn.disabled=false;}
@@ -1868,6 +2015,44 @@ function applyLogFilter(){
 async function clearLog(){
   try{await fetch('/api/log/clear',{method:'POST'});_allLogs=[];applyLogFilter();}catch(e){}
 }
+function _triggerDownload(blob,fname){
+  const u=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=u;a.download=fname;a.click();
+  URL.revokeObjectURL(u);
+}
+function _tsStr(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+'-'+p(d.getMinutes());
+}
+function _fnameFromCD(cd,fallback){
+  if(cd){const m=cd.match(/filename="?([^";]+)"?/);if(m)return m[1];}
+  return fallback;
+}
+async function downloadCSV(){
+  try{
+    const data=await(await fetch('/api/history')).json();
+    const pad=n=>String(n).padStart(2,'0');
+    let csv='timestamp,datetime,temp_c,hum_pct,watt,fan_pct\r\n';
+    for(const p of data){
+      const d=new Date(p.ts*1000);
+      const dt=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      csv+=`${p.ts},${dt},${p.temp.toFixed(1)},${p.hum.toFixed(0)},${p.watt.toFixed(1)},${p.fan}\r\n`;
+    }
+    _triggerDownload(new Blob([csv],{type:'text/csv'}),'fancontrol_'+_tsStr()+'.csv');
+  }catch(e){alert('CSV download error: '+e);}
+}
+async function downloadLog(){
+  try{
+    const data=await(await fetch('/api/log/all')).json();
+    let txt='';
+    for(const e of data){
+      const lvl=e.level==='ERROR'?'ERR':e.level==='WARN'?'WRN':'INF';
+      txt+=`[${e.time}][${lvl}][${e.tag}] ${e.msg}\n`;
+    }
+    _triggerDownload(new Blob([txt],{type:'text/plain'}),'fancontrol_ramlog_'+_tsStr()+'.txt');
+  }catch(e){alert('Log download error: '+e);}
+}
 
 // ── Manual fan ─────────────────────────────────────────────────────
 function updateManUI(isMan,pct){
@@ -1919,9 +2104,10 @@ document.getElementById('otaF').onsubmit=function(e){
         prg=document.getElementById('otaPrg'),st=document.getElementById('otaSt');
   btn.disabled=true;prg.style.display='block';st.textContent='Nalaganje...';
   const xhr=new XMLHttpRequest();
-  xhr.upload.onprogress=function(ev){if(ev.lengthComputable){const p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';st.textContent='Nalaganje: '+p+'%';}};
+  let _otaDone=false;
+  xhr.upload.onprogress=function(ev){if(ev.lengthComputable){const p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';st.textContent='Nalaganje: '+p+'%';if(p>=100)_otaDone=true;}};
   xhr.onload=function(){if(xhr.status===200){bar.style.width='100%';bar.style.background='#30d158';st.textContent='Uspelo! Naprava se resetira v 5s...';setTimeout(()=>{location.href='/';},5500);}else{bar.style.background='#ff3b30';st.textContent='Napaka: '+xhr.responseText;btn.disabled=false;}};
-  xhr.onerror=function(){st.textContent='Napaka pri prenosu!';btn.disabled=false;};
+  xhr.onerror=function(){if(_otaDone){bar.style.width='100%';bar.style.background='#30d158';st.textContent='Firmware naložen — naprava se je resetirala. Osvežujem...';setTimeout(()=>{location.href='/';},5000);}else{st.textContent='Napaka pri prenosu!';btn.disabled=false;}};
   const fd=new FormData();fd.append('update',f);xhr.open('POST','/update');xhr.send(fd);
 };
 </script></body></html>
@@ -2150,6 +2336,27 @@ void initWebserver() {
         request->send(200, "application/json", resp);
     });
 
+    // --- GET /api/log/all → streaming JSON array VSEH vnosov (za download) ---
+    server.on("/api/log/all", HTTP_GET, [](AsyncWebServerRequest *request){
+        int count = logGetCount();
+        AsyncResponseStream *resp = request->beginResponseStream("application/json");
+        resp->print("[");
+        for (int i = 0; i < count; i++) {
+            LogEntry e = logGetEntry(i);
+            if (i > 0) resp->print(",");
+            StaticJsonDocument<300> doc;
+            doc["time"]  = e.time;
+            doc["level"] = (e.level == LOG_LVL_ERROR) ? "ERROR" :
+                           (e.level == LOG_LVL_WARN)  ? "WARN"  : "INFO";
+            doc["tag"]   = e.tag;
+            doc["msg"]   = e.msg;
+            String s; serializeJson(doc, s);
+            resp->print(s);
+        }
+        resp->print("]");
+        request->send(resp);
+    });
+
     // --- POST /api/log/clear → počisti log buffer ---
     server.on("/api/log/clear", HTTP_POST, [](AsyncWebServerRequest *request){
         logClear();
@@ -2244,7 +2451,8 @@ void initWebserver() {
             locked.add(settings.curveLocked[i]);
             conf.add(settings.curveConfidence[i]);
         }
-        doc["fanMinPct"]    = settings.fanMinPct;
+        doc["fanStartPct"]  = settings.fanStartPct;
+        doc["fanStopPct"]   = settings.fanStopPct;
         doc["fanMaxDayPct"] = settings.fanMaxDayPct;
         doc["dndMaxPct"]    = settings.dndMaxPct;
         doc["dndEnabled"]   = settings.dndEnabled;
@@ -2320,17 +2528,33 @@ void initWebserver() {
                     settings.curveLocked[i] = lk[i];
                 }
             }
-            if (doc.containsKey("fanMinPct")) {
-                uint8_t v = doc["fanMinPct"];
-                if (v <= 100) settings.fanMinPct = v;
+            if (doc.containsKey("fanStartPct") || doc.containsKey("fanStopPct")) {
+                uint8_t newStart = (uint8_t)constrain(
+                    doc["fanStartPct"] | (int)settings.fanStartPct, 1, 100);
+                uint8_t newStop = (uint8_t)constrain(
+                    doc["fanStopPct"] | (int)settings.fanStopPct, 0, 99);
+                if ((int)newStart - (int)newStop < 1) {
+                    request->send(400, "application/json",
+                        "{\"error\":\"fanStopPct mora biti vsaj 1% nizji od fanStartPct\"}");
+                    return;
+                }
+                settings.fanStartPct = newStart;
+                settings.fanStopPct  = newStop;
             }
             if (doc.containsKey("fanMaxDayPct")) {
                 uint8_t v = doc["fanMaxDayPct"];
                 if (v <= 100) settings.fanMaxDayPct = v;
             }
             if (doc.containsKey("dndMaxPct")) {
-                uint8_t v = doc["dndMaxPct"];
-                if (v <= 100) settings.dndMaxPct = v;
+                uint8_t v = (uint8_t)constrain((int)(doc["dndMaxPct"] | 0), 0, 100);
+                // Veljavno: 0% (fan ugasnjen med DND) ALI >= fanStartPct (fan se lahko zažene)
+                // Prepovedano: 1 do fanStartPct-1 (fan se ne bi zagnal — nima smisla)
+                if (v > 0 && v < settings.fanStartPct) {
+                    request->send(400, "application/json",
+                        "{\"error\":\"DND max mora biti 0% ali vsaj toliko kot prag zagona ventilatorja\"}");
+                    return;
+                }
+                settings.dndMaxPct = v;
             }
             if (doc.containsKey("dndEnabled")) settings.dndEnabled = doc["dndEnabled"];
             if (doc.containsKey("dndFrom")) {
@@ -2540,13 +2764,13 @@ void initWebserver() {
                 ok ? "OK" : ("FAIL: " + msg));
             resp->addHeader("Connection", "close");
             request->send(resp);
-            if (ok) { delay(500); ESP.restart(); }
+            if (ok) { delay(1500); ESP.restart(); }
         },
         [](AsyncWebServerRequest *request, String filename,
            size_t index, uint8_t *data, size_t len, bool final){
             if (!index) {
                 LOG_INFO("OTA", "Start: %s (%u B)",
-                         filename.c_str(), request->contentLength());
+                         filename.c_str(), (unsigned)request->contentLength());
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH))
                     LOG_ERROR("OTA", "begin failed: %s", Update.errorString());
             }
@@ -2570,7 +2794,7 @@ void initWebserver() {
             static char _pwmBuf[128];
             static size_t _pwmLen = 0;
             if (index == 0) { _pwmLen = 0; memset(_pwmBuf, 0, sizeof(_pwmBuf)); }
-            size_t cp = min(len, sizeof(_pwmBuf) - 1 - _pwmLen);
+            size_t cp = (len < sizeof(_pwmBuf) - 1 - _pwmLen) ? len : sizeof(_pwmBuf) - 1 - _pwmLen;
             memcpy(_pwmBuf + _pwmLen, data, cp);
             _pwmLen += cp;
             if (index + len != total) return;
@@ -2647,6 +2871,15 @@ void initWebserver() {
     server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request){
         request->send(200, "application/json", "{\"status\":\"restarting\"}");
         LOG_INFO("WEB", "/api/restart — zahtevam restart");
+        delay(500);
+        ESP.restart();
+    });
+
+    // --- POST /api/settings/reset → ponastavi nastavitve na privzete vrednosti in restart ---
+    server.on("/api/settings/reset", HTTP_POST, [](AsyncWebServerRequest *request){
+        LOG_INFO("WEB", "/api/settings/reset — ponastavitev na privzete vrednosti");
+        resetSettings();
+        request->send(200, "application/json", "{\"status\":\"reset\"}");
         delay(500);
         ESP.restart();
     });
@@ -2822,6 +3055,30 @@ void initWebserver() {
         request->send(200, "application/json", "{\"status\":\"scanning\"}");
     });
 
+    // --- POST /api/wifi/connect?ssid=X → poveži na specifičen znan SSID ---
+    server.on("/api/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (!request->hasParam("ssid")) {
+            request->send(400, "application/json", "{\"error\":\"missing ssid\"}");
+            return;
+        }
+        String ssid = request->getParam("ssid")->value();
+        // Preveri da SSID obstaja v slotih
+        bool found = false;
+        for (int i = 0; i < WIFI_SLOT_COUNT; i++) {
+            if (settings.wifiSlots[i].enabled && ssid == settings.wifiSlots[i].ssid) {
+                found = true; break;
+            }
+        }
+        if (!found) {
+            request->send(403, "application/json", "{\"error\":\"unknown ssid\"}");
+            return;
+        }
+        LOG_INFO("WEB", "/api/wifi/connect — zahtevam: '%s'", ssid.c_str());
+        strncpy(wifiConnectTarget, ssid.c_str(), 31); wifiConnectTarget[31] = '\0';
+        wifiConnectRequested = true;
+        request->send(200, "application/json", "{\"status\":\"connecting\"}");
+    });
+
     // --- POST /api/factory_reset → ponastavi WiFi slote na factory defaults ---
     server.on("/api/factory_reset", HTTP_POST, [](AsyncWebServerRequest *request){
         LOG_INFO("WEB", "/api/factory_reset — ponastavitev WiFi slotov");
@@ -2862,12 +3119,20 @@ void initWebserver() {
 void handleWebserver() {
     // ESP32 ESPmDNS teče v ozadju — update() ni potreben
 
-    // Async WiFi scan iz UI (sproži scan v main loop, ne v AsyncWebServer callbacku)
+    // UI scan: disconnect→scan→reconnect
     if (wifiScanRequested && !wifiScanInProgress) {
         wifiScanRequested = false;
-        wifiStartAsyncScan();
+        wifiScanInProgress = true;
+        wifiUiScanAndReconnect();
+        wifiScanInProgress = false;
     }
-    wifiPollAsyncScan();
+    // UI connect na specifičen SSID
+    if (wifiConnectRequested && !wifiScanInProgress) {
+        wifiConnectRequested = false;
+        wifiScanInProgress = true;
+        wifiConnectToSSID(wifiConnectTarget);
+        wifiScanInProgress = false;
+    }
 
     // NTP re-sync vsakih 30 min (normalno delovanje)
     if (timeSynced && millis() - lastNtpSyncMs >= NTP_UPDATE_INTERVAL) {

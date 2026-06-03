@@ -12,11 +12,11 @@
 #include <qrcode.h>
 
 // Font aliasi — tehno stil (_mf: Extended Latin, podpora za °C in Č)
-#define FONT_LABEL  u8g2_font_profont10_mf
+#define FONT_LABEL  u8g2_font_profont12_mf
 #define FONT_VALUE  u8g2_font_logisoso16_tf
 #define FONT_TIME   u8g2_font_logisoso28_tf
 #define FONT_DAY    u8g2_font_profont17_mf
-#define FONT_UNIT   u8g2_font_profont10_mf
+#define FONT_UNIT   u8g2_font_profont12_mf
 
 // DEPG0290BS, 128×296px, SSD1680 — pokončna orientacija
 GxEPD2_BW<GxEPD2_290_BS, GxEPD2_290_BS::HEIGHT> display(
@@ -72,8 +72,6 @@ bool initDisplay() {
         display.fillScreen(GxEPD_WHITE);
     } while (display.nextPage());
 
-    LOG_INFO("EPD", "clearScreen OK");
-
     u8g2Fonts.begin(display);
     u8g2Fonts.setFontMode(1);
     u8g2Fonts.setFontDirection(0);
@@ -109,7 +107,7 @@ void showBootScreen() {
         display.drawFastHLine(4, 62, 120, GxEPD_BLACK);
 
         // ── Mrežni podatki ────────────────────────────────────────
-        u8g2Fonts.setFont(u8g2_font_profont10_mf);
+        u8g2Fonts.setFont(u8g2_font_profont12_mf);
 
         // ESP32 IP
         u8g2Fonts.setCursor(4, 76);
@@ -163,6 +161,40 @@ void showBootScreen() {
     LOG_INFO("EPD", "Boot screen OK");
 }
 
+static void drawFancyBar(int16_t bx, int16_t by, int16_t bw, int16_t bh, int16_t fillW) {
+    const int16_t r = bh / 2;
+
+    // Outline — pill shape (polkrožna konca)
+    display.drawRoundRect(bx, by, bw, bh, r, GxEPD_BLACK);
+
+    // Fill — levi polkrog + pravokotnik (+ desni polkrog pri polni vrednosti)
+    if (fillW > 0) {
+        int16_t fw = min(fillW, bw);
+        // Levi polkrog (cel krog — desna half se pokrije s pravokotniki)
+        display.fillCircle(bx + r, by + r, r, GxEPD_BLACK);
+        // Telo pravokotnika desno od levega polkroga
+        if (fw > r)
+            display.fillRect(bx + r, by, fw - r, bh, GxEPD_BLACK);
+        // Desni polkrog — samo ko fill doseže desni konec
+        if (fw >= bw - r)
+            display.fillCircle(bx + bw - r, by + r, r, GxEPD_BLACK);
+        // Obreži desni "štrleči" del kroga — ravna desna meja fill-a
+        if (fw < 2 * r)
+            display.fillRect(bx + fw, by, 2 * r - fw, bh, GxEPD_WHITE);
+    }
+
+    // Ticki na 20 / 40 / 60 / 80 %
+    const uint8_t tickPcts[4] = {20, 40, 60, 80};
+    for (uint8_t i = 0; i < 4; i++) {
+        int16_t tx = bx + (int16_t)((int32_t)bw * tickPcts[i] / 100);
+        uint16_t col = (tx < bx + fillW) ? GxEPD_WHITE : GxEPD_BLACK;
+        display.drawFastVLine(tx, by + 2, bh - 4, col);
+    }
+
+    // Ponovi outline — popravi robove
+    display.drawRoundRect(bx, by, bw, bh, r, GxEPD_BLACK);
+}
+
 void updateDisplay(bool fullRefresh) {
     if (sensorData.err & ERR_DISPLAY) {
         LOG_WARN("EPD", "updateDisplay() preskocen — ERR_DISPLAY");
@@ -197,14 +229,14 @@ void updateDisplay(bool fullRefresh) {
         u8g2Fonts.print(timeSynced ? myTZ.dateTime("H:i").c_str() : "--:--");
 
         // Sunrise / Sunset (desno poravnano, samo HH:MM)
-        u8g2Fonts.setFont(u8g2_font_profont10_mf);
+        u8g2Fonts.setFont(u8g2_font_profont12_mf);
         {
             const int16_t rEdge = EPD_WIDTH - 4;
             int16_t w = u8g2Fonts.getUTF8Width(weatherData.sunrise);
             u8g2Fonts.setCursor(rEdge - w, 22);
             u8g2Fonts.print(weatherData.sunrise);
             w = u8g2Fonts.getUTF8Width(weatherData.sunset);
-            u8g2Fonts.setCursor(rEdge - w, 34);
+            u8g2Fonts.setCursor(rEdge - w, 36);
             u8g2Fonts.print(weatherData.sunset);
         }
 
@@ -213,8 +245,8 @@ void updateDisplay(bool fullRefresh) {
             char dateBuf[32];
             snprintf(dateBuf, sizeof(dateBuf), "%s %d.%d.%d",
                      getDaySLO(), myTZ.day(), myTZ.month(), myTZ.year());
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
-            u8g2Fonts.setCursor(4, 46);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
+            u8g2Fonts.setCursor(4, 51);
             u8g2Fonts.print(dateBuf);
         }
 
@@ -231,7 +263,7 @@ void updateDisplay(bool fullRefresh) {
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
                 u8g2Fonts.setCursor(4, 72);
                 u8g2Fonts.print("--.-");
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(40, 72);
                 u8g2Fonts.print("\xC2\xB0" "C");
             } else {
@@ -240,7 +272,7 @@ void updateDisplay(bool fullRefresh) {
                 u8g2Fonts.setCursor(4, 72);
                 u8g2Fonts.print(buf);
                 int16_t tw = u8g2Fonts.getUTF8Width(buf);
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(4 + tw + 2, 72);
                 u8g2Fonts.print("\xC2\xB0" "C");
             }
@@ -250,7 +282,7 @@ void updateDisplay(bool fullRefresh) {
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
                 u8g2Fonts.setCursor(4, 94);
                 u8g2Fonts.print("--");
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(22, 94);
                 u8g2Fonts.print("%");
             } else {
@@ -259,7 +291,7 @@ void updateDisplay(bool fullRefresh) {
                 u8g2Fonts.setCursor(4, 94);
                 u8g2Fonts.print(buf);
                 int16_t hw = u8g2Fonts.getUTF8Width(buf);
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(4 + hw + 2, 94);
                 u8g2Fonts.print("%");
             }
@@ -280,7 +312,7 @@ void updateDisplay(bool fullRefresh) {
             char buf[12];
 
             // Labeli
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4, 116);
             u8g2Fonts.print("TEMP");
             u8g2Fonts.setCursor(70, 116);
@@ -293,7 +325,7 @@ void updateDisplay(bool fullRefresh) {
             u8g2Fonts.setCursor(4, 141);
             u8g2Fonts.print(buf);
             int16_t tw = u8g2Fonts.getUTF8Width(buf);
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4 + tw + 2, 141);
             u8g2Fonts.print("\xC2\xB0" "C");
 
@@ -303,19 +335,18 @@ void updateDisplay(bool fullRefresh) {
             u8g2Fonts.setCursor(70, 141);
             u8g2Fonts.print(buf);
             int16_t hw = u8g2Fonts.getUTF8Width(buf);
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(70 + hw + 2, 141);
             u8g2Fonts.print("%");
 
             // FAN bar (w=80, 10% ožji od prejšnjih 88)
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4, 157);
             u8g2Fonts.print("FAN");
 
             const int16_t fanBarX = 4, fanBarY = 161, fanBarW = 80, fanBarH = 12;
-            display.drawRect(fanBarX, fanBarY, fanBarW, fanBarH, GxEPD_BLACK);
             int16_t fanFill = (int16_t)((int32_t)fanBarW * sensorData.fanPct / 100);
-            if (fanFill > 0) display.fillRect(fanBarX, fanBarY, fanFill, fanBarH, GxEPD_BLACK);
+            drawFancyBar(fanBarX, fanBarY, fanBarW, fanBarH, fanFill);
 
             char pctBuf[6];
             snprintf(pctBuf, sizeof(pctBuf), "%d%%", sensorData.fanPct);
@@ -334,7 +365,7 @@ void updateDisplay(bool fullRefresh) {
             char buf[10];
 
             // Labeli — NAPETOST cela beseda
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4, 201);
             u8g2Fonts.print("NAPETOST");
             u8g2Fonts.setCursor(68, 201);
@@ -347,7 +378,7 @@ void updateDisplay(bool fullRefresh) {
             u8g2Fonts.setCursor(4, 223);
             u8g2Fonts.print(buf);
             int16_t vw = u8g2Fonts.getUTF8Width(buf);
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4 + vw + 2, 223);
             u8g2Fonts.print("V");
 
@@ -357,30 +388,29 @@ void updateDisplay(bool fullRefresh) {
             u8g2Fonts.setCursor(68, 223);
             u8g2Fonts.print(buf);
             int16_t aw = u8g2Fonts.getUTF8Width(buf);
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(68 + aw + 2, 223);
             u8g2Fonts.print("A");
 
             // MOC bar (w=80, enako kot FAN bar)
-            u8g2Fonts.setFont(u8g2_font_profont10_mf);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
             u8g2Fonts.setCursor(4, 237);
             u8g2Fonts.print("MOC");
 
             const int16_t watBarX = 4, watBarY = 240, watBarW = 80, watBarH = 12;
-            display.drawRect(watBarX, watBarY, watBarW, watBarH, GxEPD_BLACK);
 
             float peak = sensorData.peakWatt;
             if (peak < PEAK_WATT_MIN_FLOOR) peak = PEAK_WATT_DEFAULT;
             float ratio = inaErr ? 0.0f : (sensorData.watt / peak);
             if (ratio > 1.0f) ratio = 1.0f;
             int16_t watFill = (int16_t)(watBarW * ratio);
-            if (watFill > 0) display.fillRect(watBarX, watBarY, watFill, watBarH, GxEPD_BLACK);
+            drawFancyBar(watBarX, watBarY, watBarW, watBarH, watFill);
 
             {
                 int16_t bx = watBarX + watBarW + 4;
                 int16_t by = watBarY + watBarH;
                 if (inaErr) {
-                    u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                    u8g2Fonts.setFont(u8g2_font_profont12_mf);
                     u8g2Fonts.setCursor(bx, by);
                     u8g2Fonts.print("--W");
                 } else {
@@ -393,7 +423,7 @@ void updateDisplay(bool fullRefresh) {
                     char deciBuf[4];
                     snprintf(deciBuf, sizeof(deciBuf), "%dW",
                              (int)(sensorData.watt * 10.0f) % 10);
-                    u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                    u8g2Fonts.setFont(u8g2_font_profont12_mf);
                     u8g2Fonts.setCursor(xAfter, by);
                     u8g2Fonts.print(deciBuf);
                 }
@@ -436,7 +466,7 @@ void updateDisplay(bool fullRefresh) {
                 // Vodoravna baza vtikača (poveže oba konca polkroga)
                 display.drawFastHLine(6, 267, 18, GxEPD_BLACK);
 
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(4, 291);
                 u8g2Fonts.print(inaErr ? "POWER ?" : (pwrOn ? "POWER ON" : "POWER OFF"));
             }
@@ -487,7 +517,7 @@ void updateDisplay(bool fullRefresh) {
                     snprintf(netBuf, sizeof(netBuf), "NET  %d/%d", okPorts, totalPorts);
                 else
                     snprintf(netBuf, sizeof(netBuf), "ERR  %d/%d", okPorts, totalPorts);
-                u8g2Fonts.setFont(u8g2_font_profont10_mf);
+                u8g2Fonts.setFont(u8g2_font_profont12_mf);
                 u8g2Fonts.setCursor(68, 291);
                 u8g2Fonts.print(netBuf);
             }

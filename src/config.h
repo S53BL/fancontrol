@@ -46,11 +46,11 @@
 #define FAN_CURVE_TEMP_3    52.0f
 #define FAN_CURVE_TEMP_4    58.0f
 #define FAN_CURVE_TEMP_5    65.0f
-#define FAN_CURVE_PCT_0     15
-#define FAN_CURVE_PCT_1     25
-#define FAN_CURVE_PCT_2     45
-#define FAN_CURVE_PCT_3     65
-#define FAN_CURVE_PCT_4     85
+#define FAN_CURVE_PCT_0     0
+#define FAN_CURVE_PCT_1     0
+#define FAN_CURVE_PCT_2     3
+#define FAN_CURVE_PCT_3     20
+#define FAN_CURVE_PCT_4     50
 #define FAN_CURVE_PCT_5     100
 
 // --- Adaptivni fan control ---
@@ -74,12 +74,14 @@
 #define BOOST_NVS_NAMESPACE           "fanboost"
 
 // --- DND (nočni tihi način) ---
-#define FAN_DND_MAX_PCT     30      // Max % med DND
+#define FAN_DND_MAX_PCT     0       // Max % med DND (0 = ventilator ugasnjen; mora biti 0 ali >= FAN_START_PCT)
 #define FAN_DND_HOUR_FROM   22      // Od ure (0–23)
 #define FAN_DND_HOUR_TO     7       // Do ure (0–23)
 
-// --- Minimalna hitrost ventilatorja ---
-#define FAN_MIN_PCT         10      // % — preprečevanje popolnega izklopa
+// --- Hysteresis ventilatorja ---
+#define FAN_START_PCT       33      // User % — prag za zagon ventilatorja
+#define FAN_STOP_PCT        27      // User % — prag za izklop ventilatorja
+#define FAN_KICK_MS         2000UL  // Trajanje startup kick [ms]
 
 // --- Časovni intervali (ms) ---
 #define SENSOR_READ_INTERVAL    10000UL    // Branje senzorjev: 10 s
@@ -132,7 +134,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.1.0"
+#define FW_VERSION          "1.1.2"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -180,7 +182,7 @@ enum ErrorFlag : uint8_t {
 #define MONITOR_PORT_7    0,    "",        false  // opcijski slot
 
 // --- WiFi Intelligence ---
-#define WIFI_ROAM_INTERVAL_MS       5400000UL  // Periodični roaming reconnect: 90 minut
+#define WIFI_ROAM_INTERVAL_MS       3600000UL  // Periodični roaming reconnect: 60 minut
 #define WIFI_NTP_FAIL_THRESHOLD     3           // Consecutive NTP napake pred WiFi reconnectom
 #define WIFI_SCAN_HISTORY_SIZE      10          // Število shranjenih scan/reconnect eventov
 #define WIFI_SCAN_MAX_APS           20          // Max AP-jev v scan rezultatih

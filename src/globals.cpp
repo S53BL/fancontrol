@@ -76,11 +76,12 @@ static void initDefaults() {
     settings.currentCorr  = 1.0f;
     settings.fanMaxDayPct = 100;
 
-    settings.dndEnabled = false;
-    settings.dndFrom    = FAN_DND_HOUR_FROM;
-    settings.dndTo      = FAN_DND_HOUR_TO;
-    settings.dndMaxPct  = FAN_DND_MAX_PCT;
-    settings.fanMinPct  = FAN_MIN_PCT;
+    settings.dndEnabled  = false;
+    settings.dndFrom     = FAN_DND_HOUR_FROM;
+    settings.dndTo       = FAN_DND_HOUR_TO;
+    settings.dndMaxPct   = FAN_DND_MAX_PCT;
+    settings.fanStartPct = FAN_START_PCT;
+    settings.fanStopPct  = FAN_STOP_PCT;
 
     // Mini PC Monitor
     strncpy(settings.monitorIp, MONITOR_DEFAULT_IP, sizeof(settings.monitorIp) - 1);
