@@ -3,11 +3,16 @@
 ```
 fancontrol/
 ├── .gitignore
+├── agent_bugfix_manual_svg.md
 ├── agent_epaper_partial_refresh.md
+├── agent_fancurve_boost_save.md
 ├── agent_robustnost.md
+├── agent_webserver_cleanup.md
 ├── partitions_16mb_ota.csv
 ├── platformio.ini
 ├── strukt_fan.md
+├── scripts/
+│   └── generate_html_gz.py
 └── src/
     ├── config.h
     ├── display.cpp
