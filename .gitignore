@@ -29,6 +29,9 @@ wifi_config.h
 *.hex
 *.map
 
+# Generirani header (iz generate_html_gz.py) — ne v git, regeneriraj pred prevajanjem
+src/webserver_html_gz.h
+
 # Logi
 *.log
 
@@ -37,6 +40,9 @@ fan_last/
 
 # Skripta za pripravo fan_last/ mape
 rename_to_txt.py
+
+# Vse .md datoteke so lokalne, ne v repozitoriju
+*.md
 
 # OS
 .DS_Store
