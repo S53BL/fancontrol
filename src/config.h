@@ -41,15 +41,15 @@
 // --- Temperaturna krivulja (6 točk, privzeto) ---
 #define FAN_CURVE_POINTS    6
 #define FAN_CURVE_TEMP_0    30.0f
-#define FAN_CURVE_TEMP_1    38.0f
-#define FAN_CURVE_TEMP_2    45.0f
+#define FAN_CURVE_TEMP_1    40.0f
+#define FAN_CURVE_TEMP_2    46.0f
 #define FAN_CURVE_TEMP_3    52.0f
 #define FAN_CURVE_TEMP_4    58.0f
 #define FAN_CURVE_TEMP_5    65.0f
 #define FAN_CURVE_PCT_0     0
-#define FAN_CURVE_PCT_1     0
-#define FAN_CURVE_PCT_2     3
-#define FAN_CURVE_PCT_3     20
+#define FAN_CURVE_PCT_1     3
+#define FAN_CURVE_PCT_2     8
+#define FAN_CURVE_PCT_3     22
 #define FAN_CURVE_PCT_4     50
 #define FAN_CURVE_PCT_5     100
 
@@ -63,18 +63,19 @@
 #define ADAPT_NVS_NAMESPACE         "fanadapt"
 
 // --- Watt Feed-Forward Boost ---
-#define BOOST_WATT_THRESHOLD_DEFAULT  10.0f
-#define BOOST_PCT_DEFAULT             20
+#define BOOST_WATT_THRESHOLD_DEFAULT  18.0f
+#define BOOST_PCT_DEFAULT             10
 #define BOOST_PCT_MIN                 5
 #define BOOST_PCT_MAX                 40
-#define BOOST_ACTIVATE_MS             5000UL
-#define BOOST_EVAL_MS_DEFAULT         120000UL
+#define BOOST_ACTIVATE_MS             15000UL
+#define BOOST_EVAL_MS_DEFAULT         20000UL
+#define BOOST_LEARN_MS_DEFAULT        120000UL  // Eval okno za boost samoučenje [ms]
 #define BOOST_TEMP_DEADBAND           0.3f
 #define BOOST_EMA_ALPHA               0.1f
 #define BOOST_NVS_NAMESPACE           "fanboost"
 
 // --- DND (nočni tihi način) ---
-#define FAN_DND_MAX_PCT     10      // Max % med DND (USER%; 0 = ugasnjen, >0 = minimalno hlajenje)
+#define FAN_DND_MAX_PCT     25      // Max % med DND (USER%; 0 = ugasnjen, >0 = minimalno hlajenje)
 #define FAN_DND_HOUR_FROM   22      // Od ure (0–23)
 #define FAN_DND_HOUR_TO     7       // Do ure (0–23)
 

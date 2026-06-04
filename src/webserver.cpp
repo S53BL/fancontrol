@@ -659,9 +659,10 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="fr"><label>Boost vrednost [%]</label>
   <input type="number" id="bPct" min="5" max="40" style="width:70px">
   &nbsp;<span id="bPctConf" style="font-size:11px;font-weight:bold;padding:2px 7px;border-radius:3px"></span>
-  <span style="font-size:10px;color:#555;margin-left:6px">privzeto: 20%</span>
+  <span style="font-size:10px;color:#555;margin-left:6px">privzeto: 10%</span>
 </div>
-<div class="fr"><label>Ocenjevalni čas [min]</label><input type="number" id="bEval" min="1" max="10" style="width:70px"></div>
+<div class="fr"><label>Fade [s]</label><input type="number" id="bEval" min="5" max="300" style="width:70px"></div>
+<div class="fr"><label>Eval okno [s]</label><input type="number" id="bLearn" min="30" max="600" style="width:70px" title="Čas po aktivaciji boosta za oceno temperaturnega trenda (samoučenje)"></div>
 <div class="fr"><label>Status</label><span id="bStatus" style="font-size:12px;color:#555">--</span></div>
 <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
   <button class="btn" onclick="saveFan('msgF4')">Shrani</button>
@@ -1548,7 +1549,7 @@ async function loadFan(){
     if(s.boostWattThreshold!==undefined){
       document.getElementById('bWth').value=s.boostWattThreshold;
       document.getElementById('bPct').value=s.boostPct;
-      document.getElementById('bEval').value=s.boostEvalMin||2;
+      document.getElementById('bEval').value=s.boostEvalSec||20;document.getElementById('bLearn').value=s.boostLearnSec||120;
       document.getElementById('bLock').checked=s.boostLocked||false;
       onBoostLockChange();
     }
@@ -1586,7 +1587,7 @@ async function saveFan(msgId='msgF5'){
     boostWattThreshold:parseFloat(document.getElementById('bWth').value)||10,
     boostPct:parseInt(document.getElementById('bPct').value)||20,
     boostLocked:document.getElementById('bLock').checked,
-    boostEvalMin:parseInt(document.getElementById('bEval').value)||2
+    boostEvalSec:parseInt(document.getElementById('bEval').value)||20,boostLearnSec:parseInt(document.getElementById('bLearn').value)||120
   };
   const dndMax = parseInt(document.getElementById('fDndM').value) || 0;
   const fanStartPwm = parseInt(document.getElementById('fanStartPct').value) || 33;
@@ -2036,24 +2037,17 @@ function _fnameFromCD(cd,fallback){
   if(cd){const m=cd.match(/filename="?([^";]+)"?/);if(m)return m[1];}
   return fallback;
 }
-async function downloadCSV(){
-  try{
-    const a=document.createElement('a');
-    a.href='/api/history/csv';
-    a.download='';
-    a.click();
-  }catch(e){alert('CSV download error: '+e);}
+function downloadCSV(){
+  const a=document.createElement('a');
+  a.href='/api/history?format=csv';
+  a.download='fancontrol_'+_tsStr()+'.csv';
+  a.click();
 }
-async function downloadLog(){
-  try{
-    const data=await(await fetch('/api/log/all')).json();
-    let txt='';
-    for(const e of data){
-      const lvl=e.level==='ERROR'?'ERR':e.level==='WARN'?'WRN':'INF';
-      txt+=`[${e.time}][${lvl}][${e.tag}] ${e.msg}\n`;
-    }
-    _triggerDownload(new Blob([txt],{type:'text/plain'}),'fancontrol_ramlog_'+_tsStr()+'.txt');
-  }catch(e){alert('Log download error: '+e);}
+function downloadLog(){
+  const a=document.createElement('a');
+  a.href='/api/log?format=txt';
+  a.download='fancontrol_ramlog_'+_tsStr()+'.txt';
+  a.click();
 }
 
 // ── Manual fan ─────────────────────────────────────────────────────
@@ -2225,16 +2219,60 @@ void initWebserver() {
         doc["boost_active"]  = boostIsActive();
         doc["boost_pct"]     = boostGetPct();
         doc["boost_watt_thr"] = settings.boostWattThreshold;
+        doc["boost_learn_ms"] = settings.boostLearnMs;
 
         String resp;
         serializeJson(doc, resp);
         request->send(200, "application/json", resp);
     });
 
-    // --- GET /api/history?from=<ts>&to=<ts>[&maxPts=<n>] → JSON array za grafe ---
-    // Oba parametra sta opcijska Unix timestampa (sekunde).
-    // maxPts: bucket averaging decimacija — vrne max N točk (cap 2000).
+    // --- GET /api/history?from=<ts>&to=<ts>[&maxPts=<n>][&format=csv] → JSON ali CSV ---
+    // format=csv: streaming CSV download vseh točk brez decimacije
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request){
+        // --- CSV streaming branch ---
+        if (request->hasParam("format") &&
+            request->getParam("format")->value() == "csv") {
+            int cnt = graphGetCount();
+            char fname[64];
+            if (timeSynced) {
+                snprintf(fname, sizeof(fname),
+                         "fancontrol_%04d-%02d-%02d_%02d-%02d.csv",
+                         myTZ.year(), myTZ.month(), myTZ.day(),
+                         myTZ.hour(), myTZ.minute());
+            } else {
+                snprintf(fname, sizeof(fname), "fancontrol_uptime_%lus.csv", millis()/1000);
+            }
+            char disp[80];
+            snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", fname);
+            AsyncResponseStream *resp = request->beginResponseStream("text/csv; charset=UTF-8");
+            resp->addHeader("Content-Disposition", disp);
+            resp->print("timestamp,datetime,temp_c,hum_pct,watt,fan_pct\r\n");
+            for (int i = 0; i < cnt; i++) {
+                GraphPoint p = graphGetPoint(i);
+                if (p.ts == 0) continue;
+                char dtbuf[20];
+                if (timeSynced) {
+                    time_t t = (time_t)p.ts;
+                    struct tm tm_info;
+                    gmtime_r(&t, &tm_info);
+                    snprintf(dtbuf, sizeof(dtbuf), "%04d-%02d-%02d %02d:%02d:%02d",
+                             tm_info.tm_year+1900, tm_info.tm_mon+1, tm_info.tm_mday,
+                             tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
+                } else {
+                    snprintf(dtbuf, sizeof(dtbuf), "no_time");
+                }
+                char line[96];
+                snprintf(line, sizeof(line), "%lu,%s,%.1f,%.0f,%.1f,%u\r\n",
+                         (unsigned long)p.ts, dtbuf,
+                         p.temp, p.hum, p.watt, (unsigned)p.fanPct);
+                resp->print(line);
+            }
+            request->send(resp);
+            LOG_INFO("WEB", "/api/history?format=csv — %d tock", cnt);
+            return;
+        }
+
+        // --- JSON branch (grafi) ---
         uint32_t fromTs = 0;
         uint32_t toTs   = 0xFFFFFFFF;
         int maxPts = 0;
@@ -2378,9 +2416,41 @@ void initWebserver() {
         LOG_INFO("WEB", "/api/history/csv — %d tock, ime: %s", cnt, fname);
     });
 
-    // --- GET /api/log → JSON array zadnjih 50 vnosov ---
+    // --- GET /api/log[?format=txt] → JSON (zadnjih 50) ali streaming TXT download (vsi) ---
     server.on("/api/log", HTTP_GET, [](AsyncWebServerRequest *request){
         int count = logGetCount();
+
+        // --- TXT streaming branch (download) ---
+        if (request->hasParam("format") &&
+            request->getParam("format")->value() == "txt") {
+            char fname[48];
+            if (timeSynced) {
+                snprintf(fname, sizeof(fname),
+                         "fancontrol_ramlog_%04d-%02d-%02d_%02d-%02d.txt",
+                         myTZ.year(), myTZ.month(), myTZ.day(),
+                         myTZ.hour(), myTZ.minute());
+            } else {
+                snprintf(fname, sizeof(fname), "fancontrol_ramlog_uptime_%lus.txt", millis()/1000);
+            }
+            char disp[80];
+            snprintf(disp, sizeof(disp), "attachment; filename=\"%s\"", fname);
+            AsyncResponseStream *resp = request->beginResponseStream("text/plain; charset=UTF-8");
+            resp->addHeader("Content-Disposition", disp);
+            for (int i = 0; i < count; i++) {
+                LogEntry e = logGetEntry(i);
+                const char* lvl = (e.level == LOG_LVL_ERROR) ? "ERR" :
+                                  (e.level == LOG_LVL_WARN)  ? "WRN" : "INF";
+                char line[180];
+                snprintf(line, sizeof(line), "[%s][%s][%s] %s\n",
+                         e.time, lvl, e.tag, e.msg);
+                resp->print(line);
+            }
+            request->send(resp);
+            LOG_INFO("WEB", "/api/log?format=txt — %d vnosov", count);
+            return;
+        }
+
+        // --- JSON branch (prikaz v UI, zadnjih 50) ---
         int start = (count > 50) ? count - 50 : 0;
         DynamicJsonDocument doc(32768);
         JsonArray arr = doc.to<JsonArray>();
@@ -2524,7 +2594,8 @@ void initWebserver() {
         doc["boostWattThreshold"] = settings.boostWattThreshold;
         doc["boostPct"]           = settings.boostPct;
         doc["boostLocked"]        = settings.boostLocked;
-        doc["boostEvalMin"]       = settings.boostEvalMs / 60000UL;
+        doc["boostEvalSec"]       = settings.boostEvalMs / 1000UL;
+        doc["boostLearnSec"]      = settings.boostLearnMs / 1000UL;
         String resp;
         serializeJson(doc, resp);
         request->send(200, "application/json", resp);
@@ -2641,9 +2712,13 @@ void initWebserver() {
             if (doc.containsKey("boostLocked")) {
                 settings.boostLocked = doc["boostLocked"];
             }
-            if (doc.containsKey("boostEvalMin")) {
-                uint32_t v = (uint32_t)(int)doc["boostEvalMin"];
-                if (v >= 1 && v <= 10) settings.boostEvalMs = v * 60000UL;
+            if (doc.containsKey("boostEvalSec")) {
+                uint32_t v = (uint32_t)(int)doc["boostEvalSec"];
+                if (v >= 5 && v <= 300) settings.boostEvalMs = v * 1000UL;
+            }
+            if (doc.containsKey("boostLearnSec")) {
+                uint32_t v = (uint32_t)(int)doc["boostLearnSec"];
+                if (v >= 30 && v <= 600) settings.boostLearnMs = v * 1000UL;
             }
 
             saveSettings();

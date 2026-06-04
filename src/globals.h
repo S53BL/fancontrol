@@ -90,6 +90,7 @@ struct Settings {
     uint8_t  boostPct;
     bool     boostLocked;
     uint32_t boostEvalMs;
+    uint32_t boostLearnMs;   // Eval okno za boost samoučenje [ms]
 
     // PWM kalibracija
     uint32_t fanPwmFreq;    // PWM frekvenca ventilatorja [Hz], privzeto 25000

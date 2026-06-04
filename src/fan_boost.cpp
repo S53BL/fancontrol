@@ -9,9 +9,10 @@
 
 void boostInit() {
     memset(&wattBoost, 0, sizeof(WattBoost));
-    LOG_INFO("BOOST", "Init OK — boostPct=%d%%  thr=%.1fW  evalMs=%lu",
+    LOG_INFO("BOOST", "Init OK — boostPct=%d%%  thr=%.1fW  fadeMs=%lu  learnMs=%lu",
              settings.boostPct, settings.boostWattThreshold,
-             (unsigned long)settings.boostEvalMs);
+             (unsigned long)settings.boostEvalMs,
+             (unsigned long)settings.boostLearnMs);
 }
 
 uint8_t boostGetExtra(float watt, float temp) {
@@ -75,14 +76,14 @@ uint8_t boostGetExtra(float watt, float temp) {
     // ── 2. Boost ni aktiven (še čakamo 5s) ───────────────────────────────
     if (!wattBoost.boostActive) return 0;
 
-    // ── 3. Ocenjevanje po boostEvalMs ────────────────────────────────────
+    // ── 3. Ocenjevanje po boostLearnMs ───────────────────────────────────
     if (!wattBoost.evalDone &&
-        (now - wattBoost.boostStartMs) >= settings.boostEvalMs) {
+        (now - wattBoost.boostStartMs) >= settings.boostLearnMs) {
 
         wattBoost.evalDone = true;
 
         float dT = temp - wattBoost.tempAtBoostStart;
-        float dTperMin = dT / ((float)settings.boostEvalMs / 60000.0f);
+        float dTperMin = dT / ((float)settings.boostLearnMs / 60000.0f);
 
         uint8_t oldPct = settings.boostPct;
         uint8_t newPct = oldPct;
