@@ -74,13 +74,13 @@
 #define BOOST_NVS_NAMESPACE           "fanboost"
 
 // --- DND (nočni tihi način) ---
-#define FAN_DND_MAX_PCT     0       // Max % med DND (0 = ventilator ugasnjen; mora biti 0 ali >= FAN_START_PCT)
+#define FAN_DND_MAX_PCT     10      // Max % med DND (USER%; 0 = ugasnjen, >0 = minimalno hlajenje)
 #define FAN_DND_HOUR_FROM   22      // Od ure (0–23)
 #define FAN_DND_HOUR_TO     7       // Do ure (0–23)
 
 // --- Hysteresis ventilatorja ---
-#define FAN_START_PCT       33      // User % — prag za zagon ventilatorja
-#define FAN_STOP_PCT        27      // User % — prag za izklop ventilatorja
+#define FAN_START_PCT       33      // %pwm — kick hitrost za fizični zagon motorja
+#define FAN_STOP_PCT        27      // %pwm — minimalna hitrost med tekom motorja
 #define FAN_KICK_MS         2000UL  // Trajanje startup kick [ms]
 
 // --- Časovni intervali (ms) ---

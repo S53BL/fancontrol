@@ -11,10 +11,9 @@ static bool     _manualMode = false;
 static uint8_t  _manualPct  = 0;
 
 // Hysteresis state
-static bool     _fanRunning    = false;
-static bool     _kickActive    = false;
-static uint32_t _kickStartMs   = 0;
-static uint8_t  _kickTargetPct = 0;
+static bool     _fanRunning  = false;
+static bool     _kickActive  = false;
+static uint32_t _kickStartMs = 0;
 
 // --- Linearna interpolacija temperaturne krivulje ---
 // Vrne ciljni % (0–100) glede na temperaturo in settings.curveTemp/curvePct
@@ -34,43 +33,65 @@ static uint8_t interpolateCurve(float temp) {
     return settings.curvePct[FAN_CURVE_POINTS - 1];
 }
 
-// --- Hysteresis + startup kick state machine ---
-// Vrne dejanski user % z upoštevanjem hysteresis logike in startup kick.
+// Konverzija %user → %PWM (identična logiki v setFanPct())
+static uint8_t _userToPwm(uint8_t userPct) {
+    if (userPct == 0) return 0;
+    float pwm = 27.0f + (float)(userPct - 1) * 73.0f / 99.0f;
+    return (uint8_t)(pwm + 0.5f);
+}
+
+// Konverzija %PWM → %user (inverzna funkcija)
+static uint8_t _pwmToUser(uint8_t pwmPct) {
+    if (pwmPct == 0) return 0;
+    if (pwmPct < 27) return 1;
+    float user = 1.0f + (float)((int)pwmPct - 27) * 99.0f / 73.0f;
+    return (uint8_t)(fminf(100.0f, user) + 0.5f);
+}
+
+// applyHysteresisAndKick — hysteresis logika za krmiljenje motorja
+// requestedPct: %user (regulacijska logika)
+// fanStartPct, fanStopPct: %PWM (fizikalni parametri motorja)
+// return: %user (posreduje setFanPct() ki pretvori v PWM)
 static uint8_t applyHysteresisAndKick(uint8_t requestedPct) {
+    uint8_t requestedPwm = _userToPwm(requestedPct);
     uint32_t now = millis();
 
     if (_kickActive) {
         if (now - _kickStartMs >= FAN_KICK_MS) {
             _kickActive = false;
-            LOG_INFO("FAN", "Kick koncan — spust na %d%%", _kickTargetPct);
-            return _kickTargetPct;
-        } else {
-            return settings.fanStartPct;
+            if (requestedPct == 0 || requestedPwm < settings.fanStopPct) {
+                _fanRunning = false;
+                LOG_INFO("FAN", "Kick koncan — req=%d%% (%d%%PWM) pod stop=%d%%PWM → OFF",
+                         requestedPct, requestedPwm, settings.fanStopPct);
+                return 0;
+            }
+            LOG_INFO("FAN", "Kick koncan → %d%%user", requestedPct);
+            return requestedPct;
         }
+        return _pwmToUser(settings.fanStartPct);
     }
 
     if (!_fanRunning) {
-        if (requestedPct >= settings.fanStartPct) {
-            _fanRunning    = true;
-            _kickActive    = true;
-            _kickStartMs   = now;
-            _kickTargetPct = requestedPct;
-            LOG_INFO("FAN", "Startup kick: %d%% -> %d%% (kick %lums)",
-                     requestedPct, settings.fanStartPct, (unsigned long)FAN_KICK_MS);
-            return settings.fanStartPct;
-        } else {
-            return 0;
+        if (requestedPct > 0 && requestedPwm >= settings.fanStartPct) {
+            _fanRunning  = true;
+            _kickActive  = true;
+            _kickStartMs = now;
+            LOG_INFO("FAN", "Startup kick: req=%d%%user (%d%%PWM) kick=%d%%PWM (%lums)",
+                     requestedPct, requestedPwm,
+                     settings.fanStartPct, (unsigned long)FAN_KICK_MS);
+            return _pwmToUser(settings.fanStartPct);
         }
-    } else {
-        if (requestedPct < settings.fanStopPct) {
-            _fanRunning = false;
-            LOG_INFO("FAN", "Hysteresis OFF: %d%% < stop=%d%%",
-                     requestedPct, settings.fanStopPct);
-            return 0;
-        } else {
-            return requestedPct;
-        }
+        return 0;
     }
+
+    // Fan teče — preveri ali PWM ostane nad fizikalnim minimumom
+    if (requestedPct == 0 || requestedPwm < settings.fanStopPct) {
+        _fanRunning = false;
+        LOG_INFO("FAN", "OFF: req=%d%%user (%d%%PWM) pod stop=%d%%PWM",
+                 requestedPct, requestedPwm, settings.fanStopPct);
+        return 0;
+    }
+    return requestedPct;
 }
 
 // --- Inicializacija ---
@@ -84,7 +105,7 @@ void initFan() {
     _kickStartMs = 0;
 
     setFanPct(0);
-    LOG_INFO("FAN", "Init OK — start=%d%% stop=%d%% kick=%lums",
+    LOG_INFO("FAN", "Init OK — start=%d%%PWM stop=%d%%PWM kick=%lums",
              settings.fanStartPct, settings.fanStopPct, (unsigned long)FAN_KICK_MS);
 }
 

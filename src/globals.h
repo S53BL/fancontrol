@@ -60,8 +60,8 @@ struct Settings {
     uint8_t  dndTo;     // ura 0–23
     uint8_t  dndMaxPct; // max % med DND
     // Hysteresis pragovi
-    uint8_t  fanStartPct;   // User % prag za zagon (default FAN_START_PCT)
-    uint8_t  fanStopPct;    // User % prag za izklop (default FAN_STOP_PCT)
+    uint8_t  fanStartPct;   // %pwm — kick hitrost za fizični zagon motorja (default FAN_START_PCT)
+    uint8_t  fanStopPct;    // %pwm — minimalna hitrost med tekom (default FAN_STOP_PCT)
 
     // Kalibracija SHT30
     float    tempOffset;      // Temperaturni offset [°C], privzeto 0.0

@@ -670,8 +670,8 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </div>
 <!-- Limiti in DND -->
 <div class="sec"><h3>Limiti in DND</h3>
-<div class="fr"><label>Zagon ventilatorja [%]</label><input type="number" id="fanStartPct" min="1" max="100" style="width:70px"></div>
-<div class="fr"><label>Izklop ventilatorja [%]</label><input type="number" id="fanStopPct" min="0" max="99" style="width:70px"></div>
+<div class="fr"><label>Zagon ventilatorja [%pwm]</label><input type="number" id="fanStartPct" min="1" max="100" style="width:70px"></div>
+<div class="fr"><label>Izklop ventilatorja [%pwm]</label><input type="number" id="fanStopPct" min="0" max="99" style="width:70px"></div>
 <div class="fr"><label>Max podnevi [%]</label><input type="number" id="fMaxD" min="0" max="100" style="width:70px"></div>
 <div class="fr"><label>Max DND [%]</label><input type="number" id="fDndM" min="0" max="100" step="1" style="width:70px"></div>
 <div style="font-size:10px;color:#555;margin-bottom:8px;margin-left:180px">
@@ -1038,6 +1038,11 @@ function getPlotWidth(){
   return w?Math.max(300,w.clientWidth):600;
 }
 
+function getMaxPts(){
+  const w=document.getElementById('uplotWrap');
+  return w?Math.max(400,Math.min(1200,w.clientWidth)):800;
+}
+
 function onPlotWheel(e){
   e.preventDefault();
   if(!_uplot||!_rawData||_rawData[0].length===0) return;
@@ -1102,7 +1107,7 @@ async function fetchAndMerge(fromTs, toTs){
   if(_fetchPending) return;
   _fetchPending=true;
   try{
-    const url = '/api/history?from='+fromTs+'&to='+toTs;
+    const url = '/api/history?from='+fromTs+'&to='+toTs+'&maxPts='+getMaxPts();
     const pts = await(await fetch(url)).json();
     if(!pts||pts.length===0){ _fetchPending=false; return; }
 
@@ -2031,15 +2036,10 @@ function _fnameFromCD(cd,fallback){
 }
 async function downloadCSV(){
   try{
-    const data=await(await fetch('/api/history')).json();
-    const pad=n=>String(n).padStart(2,'0');
-    let csv='timestamp,datetime,temp_c,hum_pct,watt,fan_pct\r\n';
-    for(const p of data){
-      const d=new Date(p.ts*1000);
-      const dt=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      csv+=`${p.ts},${dt},${p.temp.toFixed(1)},${p.hum.toFixed(0)},${p.watt.toFixed(1)},${p.fan}\r\n`;
-    }
-    _triggerDownload(new Blob([csv],{type:'text/csv'}),'fancontrol_'+_tsStr()+'.csv');
+    const a=document.createElement('a');
+    a.href='/api/history/csv';
+    a.download='';
+    a.click();
   }catch(e){alert('CSV download error: '+e);}
 }
 async function downloadLog(){
@@ -2229,12 +2229,13 @@ void initWebserver() {
         request->send(200, "application/json", resp);
     });
 
-    // --- GET /api/history?from=<ts>&to=<ts> → JSON array za grafe ---
+    // --- GET /api/history?from=<ts>&to=<ts>[&maxPts=<n>] → JSON array za grafe ---
     // Oba parametra sta opcijska Unix timestampa (sekunde).
-    // Brez parametrov vrne vse točke v bufferju.
+    // maxPts: bucket averaging decimacija — vrne max N točk (cap 2000).
     server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request){
         uint32_t fromTs = 0;
         uint32_t toTs   = 0xFFFFFFFF;
+        int maxPts = 0;
 
         if (request->hasParam("from")) {
             fromTs = (uint32_t)atol(request->getParam("from")->value().c_str());
@@ -2242,22 +2243,81 @@ void initWebserver() {
         if (request->hasParam("to")) {
             toTs = (uint32_t)atol(request->getParam("to")->value().c_str());
         }
+        if (request->hasParam("maxPts")) {
+            maxPts = atoi(request->getParam("maxPts")->value().c_str());
+        }
 
         int cnt = graphGetCount();
         AsyncResponseStream *resp = request->beginResponseStream("application/json");
         resp->print("[");
-        bool first = true;
-        for (int i = 0; i < cnt; i++) {
-            GraphPoint p = graphGetPoint(i);
-            if (p.ts < fromTs || p.ts > toTs) continue;
-            if (!first) resp->print(",");
-            first = false;
-            char buf[96];
-            snprintf(buf, sizeof(buf),
-                     "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.0f,\"watt\":%.1f,\"fan\":%u}",
-                     (unsigned long)p.ts, p.temp, p.hum, p.watt, (unsigned)p.fanPct);
-            resp->print(buf);
+
+        struct BucketAcc {
+            double sumTs, sumTemp, sumHum, sumWatt, sumFan;
+            int count;
+        };
+
+        bool decimated = false;
+        if (maxPts > 0 && toTs > fromTs) {
+            int winCount = 0;
+            for (int i = 0; i < cnt; i++) {
+                GraphPoint p = graphGetPoint(i);
+                if (p.ts >= fromTs && p.ts <= toTs) winCount++;
+            }
+            if (winCount > maxPts) {
+                int capped = (maxPts > 2000) ? 2000 : maxPts;
+                BucketAcc* buckets = (BucketAcc*)ps_malloc(sizeof(BucketAcc) * capped);
+                if (buckets) {
+                    memset(buckets, 0, sizeof(BucketAcc) * capped);
+                    int64_t range = (int64_t)toTs - (int64_t)fromTs + 1;
+                    for (int i = 0; i < cnt; i++) {
+                        GraphPoint p = graphGetPoint(i);
+                        if (p.ts < fromTs || p.ts > toTs) continue;
+                        int bi = (int)((int64_t)(p.ts - fromTs) * capped / range);
+                        if (bi >= capped) bi = capped - 1;
+                        buckets[bi].sumTs   += p.ts;
+                        buckets[bi].sumTemp += p.temp;
+                        buckets[bi].sumHum  += p.hum;
+                        buckets[bi].sumWatt += p.watt;
+                        buckets[bi].sumFan  += p.fanPct;
+                        buckets[bi].count++;
+                    }
+                    bool first = true;
+                    for (int i = 0; i < capped; i++) {
+                        if (!buckets[i].count) continue;
+                        int c = buckets[i].count;
+                        if (!first) resp->print(",");
+                        first = false;
+                        char buf[96];
+                        snprintf(buf, sizeof(buf),
+                                 "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.0f,\"watt\":%.1f,\"fan\":%u}",
+                                 (unsigned long)(uint32_t)(buckets[i].sumTs / c),
+                                 buckets[i].sumTemp / c,
+                                 buckets[i].sumHum / c,
+                                 buckets[i].sumWatt / c,
+                                 (unsigned)(int)(buckets[i].sumFan / c + 0.5));
+                        resp->print(buf);
+                    }
+                    free(buckets);
+                    decimated = true;
+                }
+            }
         }
+
+        if (!decimated) {
+            bool first = true;
+            for (int i = 0; i < cnt; i++) {
+                GraphPoint p = graphGetPoint(i);
+                if (p.ts < fromTs || p.ts > toTs) continue;
+                if (!first) resp->print(",");
+                first = false;
+                char buf[96];
+                snprintf(buf, sizeof(buf),
+                         "{\"ts\":%lu,\"temp\":%.1f,\"hum\":%.0f,\"watt\":%.1f,\"fan\":%u}",
+                         (unsigned long)p.ts, p.temp, p.hum, p.watt, (unsigned)p.fanPct);
+                resp->print(buf);
+            }
+        }
+
         resp->print("]");
         request->send(resp);
     });
@@ -2548,7 +2608,8 @@ void initWebserver() {
             if (doc.containsKey("dndMaxPct")) {
                 uint8_t v = (uint8_t)constrain((int)(doc["dndMaxPct"] | 0), 0, 100);
                 // Veljavno: 0% (fan ugasnjen med DND) ALI >= fanStartPct (fan se lahko zažene)
-                // Prepovedano: 1 do fanStartPct-1 (fan se ne bi zagnal — nima smisla)
+                // Prepovedano: 1 do fanStartPct-1 — hysteresis bi dvignil na fanStopPct,
+                // nastavljeno se ne bi ujemalo z dejanskim obnašanjem
                 if (v > 0 && v < settings.fanStartPct) {
                     request->send(400, "application/json",
                         "{\"error\":\"DND max mora biti 0% ali vsaj toliko kot prag zagona ventilatorja\"}");
@@ -2648,10 +2709,16 @@ void initWebserver() {
         portENTER_CRITICAL(&dataMux);
         PortEntry portsCopy[MONITOR_MAX_PORTS];
         memcpy(portsCopy, monitorGetPorts(), sizeof(portsCopy));
+        float  liveWatt   = sensorData.watt;
+        uint8_t liveErr   = sensorData.err;
+        float  wattThr    = settings.monitorWattThreshold;
         portEXIT_CRITICAL(&dataMux);
 
+        // powered izračunamo v real-time iz trenutnega watt (ne čakamo 5-min TCP scan)
+        bool powered = !(liveErr & ERR_INA219) && (liveWatt >= wattThr);
+
         StaticJsonDocument<1024> doc;
-        doc["powered"]    = res.powered;
+        doc["powered"]    = powered;
         doc["all_ok"]     = res.allPortsOk;
         doc["port_ok"]    = res.portOkCount;
         doc["port_total"] = res.portCount;

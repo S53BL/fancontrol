@@ -420,8 +420,8 @@ void updateDisplay(bool fullRefresh) {
                     u8g2Fonts.setCursor(bx, by);
                     u8g2Fonts.print(wholeBuf);
                     int16_t xAfter = bx + u8g2Fonts.getUTF8Width(wholeBuf);
-                    char deciBuf[4];
-                    snprintf(deciBuf, sizeof(deciBuf), "%dW",
+                    char deciBuf[5];
+                    snprintf(deciBuf, sizeof(deciBuf), "%d W",
                              (int)(sensorData.watt * 10.0f) % 10);
                     u8g2Fonts.setFont(u8g2_font_profont12_mf);
                     u8g2Fonts.setCursor(xAfter, by);
