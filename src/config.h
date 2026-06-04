@@ -40,16 +40,16 @@
 
 // --- Temperaturna krivulja (6 točk, privzeto) ---
 #define FAN_CURVE_POINTS    6
-#define FAN_CURVE_TEMP_0    30.0f
-#define FAN_CURVE_TEMP_1    40.0f
-#define FAN_CURVE_TEMP_2    46.0f
-#define FAN_CURVE_TEMP_3    52.0f
-#define FAN_CURVE_TEMP_4    58.0f
+#define FAN_CURVE_TEMP_0    28.0f
+#define FAN_CURVE_TEMP_1    35.0f
+#define FAN_CURVE_TEMP_2    40.0f
+#define FAN_CURVE_TEMP_3    46.0f
+#define FAN_CURVE_TEMP_4    55.0f
 #define FAN_CURVE_TEMP_5    65.0f
 #define FAN_CURVE_PCT_0     0
-#define FAN_CURVE_PCT_1     3
-#define FAN_CURVE_PCT_2     8
-#define FAN_CURVE_PCT_3     22
+#define FAN_CURVE_PCT_1     2
+#define FAN_CURVE_PCT_2     7
+#define FAN_CURVE_PCT_3     20
 #define FAN_CURVE_PCT_4     50
 #define FAN_CURVE_PCT_5     100
 
@@ -63,7 +63,7 @@
 #define ADAPT_NVS_NAMESPACE         "fanadapt"
 
 // --- Watt Feed-Forward Boost ---
-#define BOOST_WATT_THRESHOLD_DEFAULT  18.0f
+#define BOOST_WATT_THRESHOLD_DEFAULT  17.0f
 #define BOOST_PCT_DEFAULT             10
 #define BOOST_PCT_MIN                 5
 #define BOOST_PCT_MAX                 40
@@ -75,9 +75,9 @@
 #define BOOST_NVS_NAMESPACE           "fanboost"
 
 // --- DND (nočni tihi način) ---
-#define FAN_DND_MAX_PCT     25      // Max % med DND (USER%; 0 = ugasnjen, >0 = minimalno hlajenje)
+#define FAN_DND_MAX_PCT     20      // Max % med DND (USER%; 0 = ugasnjen, >0 = minimalno hlajenje)
 #define FAN_DND_HOUR_FROM   22      // Od ure (0–23)
-#define FAN_DND_HOUR_TO     7       // Do ure (0–23)
+#define FAN_DND_HOUR_TO     6       // Do ure (0–23)
 
 // --- Hysteresis ventilatorja ---
 #define FAN_START_PCT       33      // %pwm — kick hitrost za fizični zagon motorja
@@ -135,7 +135,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.1.8"
+#define FW_VERSION          "1.2.1"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -155,10 +155,14 @@ enum ErrorFlag : uint8_t {
 #define WEATHER_URL_TEMPLATE    "http://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current=temperature_2m,relative_humidity_2m,weather_code&daily=sunrise,sunset&timezone=Europe%%2FLjubljana"
 #define WEATHER_BUFFER_SIZE     4096    // PSRAM buffer za weather JSON odgovor
 
-// --- Peak watt avtokalibracija ---
-#define PEAK_WATT_NVS_KEY       "peakWatt"  // Ključ v NVS za persistenco
-#define PEAK_WATT_DEFAULT       15.0f       // Privzeti max [W] pri prvem zagonu
-#define PEAK_WATT_MIN_FLOOR     5.0f        // Nikoli pod 5W (varnostni floor)
+// --- Peak trackerji ---
+#define PEAK_WATT_NVS_KEY        "peakWatt"    // NVS: zadnji max watt [W]
+#define PEAK_WATT_TS_NVS_KEY     "peakWattTs"  // NVS: unix timestamp zadnjega watt peaka
+#define PEAK_WATT_DEFAULT        15.0f         // Privzeti max [W] pri prvem zagonu
+#define PEAK_WATT_MIN_FLOOR      5.0f          // Nikoli pod 5W (varnostni floor)
+#define PEAK_DECAY_HALFLIFE_DAYS 14.0f         // Watt peak razpolovi se vsakih 14 dni
+#define PEAK_TEMP_NVS_KEY        "peakTemp"    // NVS: max temperatura [°C]
+#define PEAK_FAN_NVS_KEY         "peakFan"     // NVS: max % ventilatorja
 
 // --- Vremenska ikona skala ---
 #define WX_ICON_SCALE           5           // LilyGo Small=10 za 960px; mi=5 za 128px
@@ -179,7 +183,7 @@ enum ErrorFlag : uint8_t {
 #define MONITOR_PORT_3    587,  "SMTP-S",  true
 #define MONITOR_PORT_4    465,  "SMTPS",   true
 #define MONITOR_PORT_5    993,  "IMAP-S",  true
-#define MONITOR_PORT_6    8443, "Webmail", true
+#define MONITOR_PORT_6    9443, "Axigen", true
 #define MONITOR_PORT_7    0,    "",        false  // opcijski slot 1
 #define MONITOR_PORT_8    0,    "",        false  // opcijski slot 2
 

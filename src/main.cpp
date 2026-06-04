@@ -218,9 +218,18 @@ void loop() {
         portEXIT_CRITICAL(&dataMux);
         graphAddPoint(pt);
 
-        // Peak temp tracker
-        if (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp)
-            peakTemp = sensorData.temp;
+        // Peak trackerji — shrani v NVS ob novem rekordu
+        bool newTempPeak = (sensorData.temp > ERR_FLOAT + 1.0f && sensorData.temp > peakTemp);
+        bool newFanPeak  = (sensorData.fanPct > peakFan);
+        if (newTempPeak) peakTemp = sensorData.temp;
+        if (newFanPeak)  peakFan  = sensorData.fanPct;
+        if (newTempPeak || newFanPeak) {
+            Preferences prefs;
+            prefs.begin(NVS_NAMESPACE, false);
+            if (newTempPeak) prefs.putFloat(PEAK_TEMP_NVS_KEY, peakTemp);
+            if (newFanPeak)  prefs.putUChar(PEAK_FAN_NVS_KEY, peakFan);
+            prefs.end();
+        }
     }
 
     // Server monitor — TCP port scan vsakih 5 min

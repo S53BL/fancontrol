@@ -143,8 +143,9 @@ extern unsigned long lastMonitorMs;
 // Mutex za thread-safety (Core 0 = web, Core 1 = senzorji/fan)
 extern portMUX_TYPE dataMux;
 
-// Peak tracker (samo RAM, brez NVS)
-extern float peakTemp;    // Max temperatura od reseta
+// Peak trackerji (NVS persistentni)
+extern float   peakTemp;  // Max temperatura (preživi reboot)
+extern uint8_t peakFan;   // Max % ventilatorja (preživi reboot)
 
 // WiFi health tracking (RAM, ne NVS)
 extern uint8_t  wifiNtpFailCount;      // Zaporedne NTP sync napake

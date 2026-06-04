@@ -3,6 +3,7 @@
 // WiFi statični IP, NTP, mDNS, OTA flash
 
 #include "webserver.h"
+#include "webserver_about.h"
 #include "globals.h"
 #include "config.h"
 #include "logging.h"
@@ -473,6 +474,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 </style></head><body>
 <header>
 <div><h1>&#9650; FANCONTROL</h1></div>
+<a href="/about" style="color:#555;font-size:11px;text-decoration:none;letter-spacing:1px;padding:4px 10px;border:1px solid #2a2a2a;border-radius:4px;white-space:nowrap">&#9432; About</a>
 <div class="hr">
 <div>IP: <span id="hip">...</span></div>
 <div>Uptime: <span id="hup">...</span></div>
@@ -495,7 +497,7 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
 <div class="card"><div class="ctit">Vlažnost</div><div><span class="cval" id="ch">--</span><span class="cunit"> %</span></div></div>
 <div class="card"><div class="ctit">Napetost</div><div><span class="cval" id="cv">--</span><span class="cunit"> V</span></div></div>
 <div class="card"><div class="ctit">Poraba</div><div><span class="cval" id="cw">--</span><span class="cunit"> W</span></div><div class="cpeak" id="pkw"></div></div>
-<div class="card"><div class="ctit">Ventilator</div><div><span class="cval" id="cf">--</span><span class="cunit"> %</span></div><div class="cdnd" id="cdnd"></div><div class="cdnd" id="cman" style="color:#ff6b00"></div></div>
+<div class="card"><div class="ctit">Ventilator</div><div><span class="cval" id="cf">--</span><span class="cunit"> %</span></div><div class="cpeak" id="pkf"></div><div class="cdnd" id="cdnd"></div><div class="cdnd" id="cman" style="color:#ff6b00"></div></div>
 <div class="card"><div class="ctit">&#9889; Napajanje</div><div class="cval" id="mpwr" style="font-size:20px">--</div></div>
 <div class="card"><div class="ctit">&#127760; Servisi</div><div><span class="cval" id="msvc" style="font-size:20px">--</span></div><div class="cpeak" id="msvd"></div></div>
 </div>
@@ -520,6 +522,15 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
     <button class="pbtn" data-sec="604800" onclick="setPeriod(604800)">7d</button>
     <button class="pbtn" data-sec="0" onclick="setPeriod(0)">VSE</button>
   </div>
+  <!-- Vrstica 2b: nav gumbi (pan + zoom) -->
+  <div style="display:flex;gap:5px;margin-bottom:8px;align-items:center" id="navBtns">
+    <span style="font-size:10px;color:#555;margin-right:2px">PAN:</span>
+    <button class="pbtn" onclick="navPan(-1)" title="Premakni levo">&#9664;</button>
+    <button class="pbtn" onclick="navPan(1)"  title="Premakni desno">&#9654;</button>
+    <span style="font-size:10px;color:#555;margin-left:6px;margin-right:2px">ZOOM:</span>
+    <button class="pbtn" onclick="navZoom(-1)" title="Pomanjšaj (daljše obdobje)">&#8722;</button>
+    <button class="pbtn" onclick="navZoom(1)"  title="Povečaj (krajše obdobje)">&#43;</button>
+  </div>
   <!-- Vrstica 3: series checkboxi -->
   <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px">
     <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
@@ -530,6 +541,9 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
       <input type="checkbox" id="cbFan" checked style="accent-color:#4ec9b0;width:13px;height:13px"> <span style="color:#4ec9b0">Ventilator %</span></label>
     <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer">
       <input type="checkbox" id="cbWatt" checked style="accent-color:#d4a76a;width:13px;height:13px"> <span style="color:#d4a76a">Poraba W</span></label>
+    <label style="font-size:11px;color:#aaa;display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px;padding-left:8px;border-left:1px solid #2a2a2a">
+      <input type="checkbox" id="cbSmooth" checked style="accent-color:#00d4ff;width:13px;height:13px">
+      <span style="color:#555">Glajenje</span></label>
   </div>
   <!-- Graf -->
   <div id="uplotWrap" style="width:100%"></div>
@@ -794,6 +808,13 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
       <button class="btn bto" onclick="doRestart()">&#128260; Ponovni zagon</button>
       <span class="msg" id="msgRestart"></span>
     </div>
+    <!-- Reset peak vrednosti -->
+    <div class="sec" style="margin-top:12px">
+      <h3>Reset Peak vrednosti</h3>
+      <p style="font-size:11px;color:#555;margin-bottom:12px">Ponastavi peak temperaturo in peak % ventilatorja. Peak porabe se samodejno prilagaja z razpadanjem.</p>
+      <button class="btn bsm bto" onclick="doResetPeaks()">&#8635; Reset peak temp &amp; fan</button>
+      <span class="msg" id="msgPeakReset"></span>
+    </div>
     <!-- Ponastavitev nastavitev -->
     <div class="sec" style="margin-top:12px;border:1px solid #3a1a1a;border-radius:6px;padding:12px">
       <h3 style="color:#ff3b30">Ponastavitev nastavitev</h3>
@@ -895,6 +916,7 @@ async function refreshData(){
     }
     document.getElementById('pkt').textContent=d.peak_temp>-900?'Peak: '+d.peak_temp+' °C':'';
     document.getElementById('pkw').textContent=d.peak_watt>0?'Peak: '+d.peak_watt+' W':'';
+    document.getElementById('pkf').textContent=d.peak_fan>0?'Peak: '+d.peak_fan+' %':'';
     if(atab===0&&_liveMode) loadHistory();
     // Sistemske info v Tab 3
     if(atab===3)buildSysInfo(d);
@@ -998,6 +1020,9 @@ function buildAxes(){
         cbW=document.getElementById('cbWatt').checked;
   const ax={stroke:COLORS.text,grid:{stroke:COLORS.grid,width:0.5},
             ticks:{show:false},font:'10px monospace'};
+  // unit na zgornjem tiku (zadnji v vals = max vrednost = vrh osi) — brez ločenega label stolpca
+  const av=(unit)=>(u,vals)=>vals.map((v,i)=>
+    v==null?'': i===vals.length-1 ? v.toFixed(0)+unit : v.toFixed(0));
   const axes=[{...ax,values:(u,vs)=>vs.map(v=>{
     if(v==null)return'';
     const d=new Date(v*1000);
@@ -1006,10 +1031,10 @@ function buildAxes(){
     return h+':'+m;
   })}];
   let ld=false;
-  if(cbT){axes.push({...ax,scale:'temp',stroke:COLORS.temp,label:'°C',size:36,side:ld?1:3});if(!ld)ld=true;}
-  if(cbH){axes.push({...ax,scale:'hum',stroke:COLORS.hum,label:'%',size:36,side:ld?1:3,grid:{show:false}});if(!ld)ld=true;}
-  if(cbF){axes.push({...ax,scale:'fan',stroke:COLORS.fan,label:'Fan%',size:36,side:1,grid:{show:false}});}
-  if(cbW){axes.push({...ax,scale:'watt',stroke:COLORS.watt,label:'W',size:36,side:1,grid:{show:false}});}
+  if(cbT){axes.push({...ax,scale:'temp',stroke:COLORS.temp,values:av('°C'),size:30,side:ld?1:3});if(!ld)ld=true;}
+  if(cbH){axes.push({...ax,scale:'hum',stroke:COLORS.hum,values:av('%'),size:28,side:ld?1:3,grid:{show:false}});if(!ld)ld=true;}
+  if(cbF){axes.push({...ax,scale:'fan',stroke:COLORS.fan,values:av('%'),size:28,side:1,grid:{show:false}});}
+  if(cbW){axes.push({...ax,scale:'watt',stroke:COLORS.watt,values:av('W'),size:28,side:1,grid:{show:false}});}
   return axes;
 }
 
@@ -1048,6 +1073,11 @@ function onPlotWheel(e){
   e.preventDefault();
   if(!_uplot||!_rawData||_rawData[0].length===0) return;
 
+  // Normalizacija deltaY — deltaMode: 0=pixel, 1=line(~40px), 2=page(~800px)
+  let delta = e.deltaY;
+  if(e.deltaMode===1) delta *= 40;
+  else if(e.deltaMode===2) delta *= 800;
+
   const xs   = _rawData[0];
   const xMin = xs[0];
   const xMax = xs[xs.length-1];
@@ -1056,13 +1086,13 @@ function onPlotWheel(e){
     const periods=[600,3600,21600,86400,259200,604800,0];
     let idx=periods.indexOf(_periodSec);
     if(idx<0) idx=1;
-    if(e.deltaY>0) idx=Math.min(idx+1,periods.length-1);
-    else           idx=Math.max(idx-1,0);
+    if(delta>0) idx=Math.min(idx+1,periods.length-1);
+    else        idx=Math.max(idx-1,0);
     setPeriod(periods[idx]);
   } else {
     const winSec = _periodSec>0 ? _periodSec : (xMax-xMin);
     const step   = winSec * 0.20;
-    const dir    = e.deltaY>0 ? 1 : -1;
+    const dir    = delta>0 ? 1 : -1;
 
     let curMin = _uplot.scales.x.min;
     let curMax = _uplot.scales.x.max;
@@ -1087,6 +1117,42 @@ function onPlotWheel(e){
   }
 }
 
+function navPan(dir){
+  if(!_uplot||!_rawData||_rawData[0].length===0) return;
+  const xs     = _rawData[0];
+  const xMin   = xs[0];
+  const xMax   = xs[xs.length-1];
+  const winSec = (_uplot.scales.x.max - _uplot.scales.x.min);
+  const step   = winSec * 0.25;
+  let newMin   = _uplot.scales.x.min + dir*step;
+  let newMax   = _uplot.scales.x.max + dir*step;
+
+  if(newMax > xMax){
+    newMax = xMax;
+    newMin = newMax - winSec;
+    _liveMode = true;
+    document.getElementById('btnLive').style.background='#30d158';
+  } else {
+    _liveMode = false;
+    document.getElementById('btnLive').style.background='#555';
+  }
+  if(newMin < xMin){ newMin=xMin; newMax=Math.min(xMin+winSec,xMax); }
+
+  _viewCenter = (newMin+newMax)/2;
+  _uplot.setScale('x',{min:newMin,max:newMax});
+  checkPrefetch(newMin, newMax);
+}
+
+function navZoom(dir){
+  // dir: +1 = povečaj (krajša perioda), -1 = pomanjšaj (daljša perioda)
+  const periods=[600,3600,21600,86400,259200,604800,0];
+  let idx=periods.indexOf(_periodSec);
+  if(idx<0) idx=1;
+  if(dir>0) idx=Math.max(idx-1,0);
+  else      idx=Math.min(idx+1,periods.length-1);
+  setPeriod(periods[idx]);
+}
+
 async function checkPrefetch(visMin, visMax){
   if(_fetchPending) return;
   if(!_cache)       return;
@@ -1104,6 +1170,27 @@ async function checkPrefetch(visMin, visMax){
   }
 }
 
+function getSmoothN(){
+  const cb=document.getElementById('cbSmooth');
+  if(cb&&!cb.checked) return 1;
+  const map={600:1,3600:3,21600:10,86400:20,259200:40,604800:80,0:100};
+  return map[_periodSec]!==undefined ? map[_periodSec] : 10;
+}
+
+function movingAvg(arr, n){
+  if(n<=1) return arr;
+  const out=new Float64Array(arr.length);
+  const half=Math.floor(n/2);
+  for(let i=0;i<arr.length;i++){
+    let sum=0,cnt=0;
+    const from=Math.max(0,i-half);
+    const to=Math.min(arr.length-1,i+half);
+    for(let j=from;j<=to;j++){sum+=arr[j];cnt++;}
+    out[i]=sum/cnt;
+  }
+  return out;
+}
+
 async function fetchAndMerge(fromTs, toTs){
   if(_fetchPending) return;
   _fetchPending=true;
@@ -1112,20 +1199,27 @@ async function fetchAndMerge(fromTs, toTs){
     const pts = await(await fetch(url)).json();
     if(!pts||pts.length===0){ _fetchPending=false; return; }
 
-    const n=pts.length;
-    const xs=new Float64Array(n),temp=new Float64Array(n),
-          hum=new Float64Array(n),fan=new Float64Array(n),watt=new Float64Array(n);
-    for(let i=0;i<n;i++){
+    const pn=pts.length;
+    const xs=new Float64Array(pn),temp=new Float64Array(pn),
+          hum=new Float64Array(pn),fan=new Float64Array(pn),watt=new Float64Array(pn);
+    for(let i=0;i<pn;i++){
       xs[i]=pts[i].ts; temp[i]=pts[i].temp; hum[i]=pts[i].hum;
       fan[i]=pts[i].fan; watt[i]=pts[i].watt;
     }
-    const newRaw=[xs,temp,hum,fan,watt];
+    // Surovi podatki ostanejo v _rawData za pan/zoom kalkulacije
+    const rawStore=[xs,temp,hum,fan,watt];
+
+    // Glajenje — watt dobi večji N ker najbolj niha; glajeni podatki samo za uPlot
+    const smN  = getSmoothN();
+    const smNW = Math.min(smN*2, 200);
+    const newRaw=[xs, movingAvg(temp,smN), movingAvg(hum,smN),
+                      movingAvg(fan,smN),  movingAvg(watt,smNW)];
 
     const curMin=_uplot?_uplot.scales.x.min:null;
     const curMax=_uplot?_uplot.scales.x.max:null;
 
-    _rawData=newRaw;
-    _cache={fromTs, toTs, raw:newRaw};
+    _rawData=rawStore;
+    _cache={fromTs, toTs, raw:rawStore};
 
     if(!_uplot){ initUplot(newRaw); }
     else{
@@ -1177,8 +1271,8 @@ function initUplot(raw){
     }
   }, buildData(raw), wrap);
 
-  const canvas=wrap.querySelector('canvas');
-  if(canvas) canvas.addEventListener('wheel', onPlotWheel, {passive:false});
+  // Wheel listener na wrap divu — zanesljivo deluje v vseh browserjih
+  wrap.addEventListener('wheel', onPlotWheel, {passive:false});
 
   applyViewWindow();
 }
@@ -1211,6 +1305,8 @@ function rebuildUplot(){ if(_rawData) initUplot(_rawData); }
   const el=document.getElementById(id);
   if(el) el.addEventListener('change',rebuildUplot);
 });
+const cbSmooth=document.getElementById('cbSmooth');
+if(cbSmooth) cbSmooth.addEventListener('change',()=>{ _cache=null; loadHistory(); });
 
 let _rt=null;
 window.addEventListener('resize',()=>{
@@ -1644,6 +1740,14 @@ async function doRestart(){
     await fetch('/api/restart',{method:'POST'});
     m.textContent='Naprava se restartira...';m.style.color='#ff9500';
     setTimeout(()=>location.reload(),6000);
+  }catch(e){m.textContent='Napaka!';m.style.color='#ff3b30';}
+}
+async function doResetPeaks(){
+  const m=document.getElementById('msgPeakReset');
+  try{
+    const r=await fetch('/api/peaks/reset',{method:'POST'});
+    if(r.ok){m.textContent='Peak vrednosti ponastavljene.';m.style.color='#30d158';setTimeout(()=>m.textContent='',4000);}
+    else{m.textContent='Napaka!';m.style.color='#ff3b30';}
   }catch(e){m.textContent='Napaka!';m.style.color='#ff3b30';}
 }
 async function doSettingsReset(){
@@ -2190,6 +2294,7 @@ void initWebserver() {
         doc["manual_pct"] = manPct;
         doc["peak_temp"] = serialized(String(peakTemp, 1));
         doc["peak_watt"] = serialized(String(peakWattVal, 1));
+        doc["peak_fan"]  = peakFan;
         doc["out_temp"]  = serialized(String(outTemp, 1));
         doc["out_hum"]   = outHum;
         doc["wx_code"]   = wxCode;
@@ -3030,6 +3135,19 @@ void initWebserver() {
         ESP.restart();
     });
 
+    // --- POST /api/peaks/reset → ponastavi peakTemp in peakFan na -999 / 0 ---
+    server.on("/api/peaks/reset", HTTP_POST, [](AsyncWebServerRequest *request){
+        LOG_INFO("WEB", "/api/peaks/reset — reset peak temp & fan");
+        peakTemp = -999.0f;
+        peakFan  = 0;
+        Preferences prefs;
+        prefs.begin(NVS_NAMESPACE, false);
+        prefs.putFloat(PEAK_TEMP_NVS_KEY, peakTemp);
+        prefs.putUChar(PEAK_FAN_NVS_KEY, peakFan);
+        prefs.end();
+        request->send(200, "application/json", "{\"status\":\"ok\"}");
+    });
+
     // --- GET /api/wifi/status → trenutno stanje + scan rezultati ---
     server.on("/api/wifi/status", HTTP_GET, [](AsyncWebServerRequest *request){
         bool connected = (WiFi.status() == WL_CONNECTED);
@@ -3254,6 +3372,9 @@ void initWebserver() {
         LOG_INFO("WEB", "/api/factory_reset OK — %d slotov ponastavljenih", WIFI_NETWORK_COUNT);
         request->send(200, "application/json", "{\"status\":\"OK\"}");
     });
+
+    // --- GET /about → tehnična referenčna stran ---
+    registerAboutHandler(server);
 
     server.begin();
     LOG_INFO("WEB", "Server started on %s", WIFI_STATIC_IP);

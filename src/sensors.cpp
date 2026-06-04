@@ -17,6 +17,10 @@ static Adafruit_INA219 ina219(ADDR_INA219);
 static bool _sht30Ok  = false;
 static bool _ina219Ok = false;
 
+// Peak watt — raw vrednost in timestamp za decay izračun
+static float    _peakWattRaw = PEAK_WATT_DEFAULT;
+static uint32_t _peakWattTs  = 0;
+
 // --- Pomožna: I2C scan za en naslov ---
 static bool i2cDevicePresent(uint8_t addr) {
     Wire.beginTransmission(addr);
@@ -69,7 +73,20 @@ bool initSensors() {
         _ina219Ok = true;
     }
 
+    initPeakWatt();
     return true; // vedno vrne true — napake so v ERR flagih
+}
+
+// Peak watt init — naloži raw vrednost in timestamp iz NVS (brez decay, NTP še ni sync)
+void initPeakWatt() {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, true);
+    _peakWattRaw = prefs.getFloat(PEAK_WATT_NVS_KEY, PEAK_WATT_DEFAULT);
+    _peakWattTs  = prefs.getUInt(PEAK_WATT_TS_NVS_KEY, 0);
+    prefs.end();
+    if (_peakWattRaw < PEAK_WATT_MIN_FLOOR) _peakWattRaw = PEAK_WATT_DEFAULT;
+    sensorData.peakWatt = _peakWattRaw;
+    LOG_INFO("SENS", "Peak watt init: %.1f W  ts=%u", _peakWattRaw, _peakWattTs);
 }
 
 // --- Branje senzorjev ---
@@ -173,20 +190,36 @@ void retrySensors() {
     }
 }
 
-// Peak watt avtokalibracija — kliče se po vsakem INA219 branju
+// Peak watt z eksponentnim razpadanjem — kliče se po vsakem INA219 branju
 void updatePeakWatt() {
     float current = sensorData.watt;
-
     if (current < PEAK_WATT_MIN_FLOOR) return;
 
-    if (current > sensorData.peakWatt) {
-        sensorData.peakWatt = current;
+    // Izračunaj efektivni peak z decay (samo če je NTP sinhroniziran in timestamp veljavni)
+    float effectivePeak = _peakWattRaw;
+    if (timeSynced && _peakWattTs > 0) {
+        uint32_t now = (uint32_t)time(nullptr);
+        if (now > _peakWattTs) {
+            float elapsedDays = (float)(now - _peakWattTs) / 86400.0f;
+            effectivePeak = _peakWattRaw * powf(0.5f, elapsedDays / PEAK_DECAY_HALFLIFE_DAYS);
+        }
+    }
+    if (effectivePeak < PEAK_WATT_MIN_FLOOR) effectivePeak = PEAK_WATT_MIN_FLOOR;
+
+    // Nov rekord — zapiši raw vrednost in timestamp
+    if (current > effectivePeak) {
+        _peakWattRaw = current;
+        _peakWattTs  = timeSynced ? (uint32_t)time(nullptr) : 0;
+        effectivePeak = current;
 
         Preferences prefs;
         prefs.begin(NVS_NAMESPACE, false);
-        prefs.putFloat(PEAK_WATT_NVS_KEY, sensorData.peakWatt);
+        prefs.putFloat(PEAK_WATT_NVS_KEY, _peakWattRaw);
+        prefs.putUInt(PEAK_WATT_TS_NVS_KEY, _peakWattTs);
         prefs.end();
 
-        LOG_INFO("SENS", "Nov peak watt: %.1f W (shranjeno v NVS)", sensorData.peakWatt);
+        LOG_INFO("SENS", "Nov peak watt: %.1f W  ts=%u (NVS)", _peakWattRaw, _peakWattTs);
     }
+
+    sensorData.peakWatt = effectivePeak;
 }

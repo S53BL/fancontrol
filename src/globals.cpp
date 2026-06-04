@@ -27,8 +27,9 @@ unsigned long lastNtpSyncMs        = 0;
 // --- Mutex za thread-safety ---
 portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 
-// --- Peak tracker (samo RAM, brez NVS) ---
-float peakTemp = -999.0f;
+// --- Peak trackerji (NVS persistentni) ---
+float   peakTemp = -999.0f;
+uint8_t peakFan  = 0;
 
 // --- WiFi health tracking (RAM, ne NVS) ---
 uint8_t  wifiNtpFailCount    = 0;
@@ -215,12 +216,15 @@ void initGlobals() {
     lastWifiCheckMs        = 0;
     lastNtpSyncMs          = 0;
 
-    // Peak watt — naloži iz NVS (persistentna vrednost)
-    Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, true);
-    sensorData.peakWatt = prefs.getFloat(PEAK_WATT_NVS_KEY, PEAK_WATT_DEFAULT);
-    if (sensorData.peakWatt < PEAK_WATT_MIN_FLOOR) sensorData.peakWatt = PEAK_WATT_DEFAULT;
-    prefs.end();
+    // Peak trackerji — naloži iz NVS (peakWatt bo naložen z initPeakWatt() v sensors.cpp)
+    sensorData.peakWatt = PEAK_WATT_DEFAULT;
+    {
+        Preferences prefs;
+        prefs.begin(NVS_NAMESPACE, true);
+        peakTemp = prefs.getFloat(PEAK_TEMP_NVS_KEY, -999.0f);
+        peakFan  = prefs.getUChar(PEAK_FAN_NVS_KEY, 0);
+        prefs.end();
+    }
 
     // WiFi sloti — inicializiraj iz NVS ali factory defaults
     {
