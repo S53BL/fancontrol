@@ -134,7 +134,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.1.2"
+#define FW_VERSION          "1.1.8"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -179,7 +179,8 @@ enum ErrorFlag : uint8_t {
 #define MONITOR_PORT_4    465,  "SMTPS",   true
 #define MONITOR_PORT_5    993,  "IMAP-S",  true
 #define MONITOR_PORT_6    8443, "Webmail", true
-#define MONITOR_PORT_7    0,    "",        false  // opcijski slot
+#define MONITOR_PORT_7    0,    "",        false  // opcijski slot 1
+#define MONITOR_PORT_8    0,    "",        false  // opcijski slot 2
 
 // --- WiFi Intelligence ---
 #define WIFI_ROAM_INTERVAL_MS       3600000UL  // Periodični roaming reconnect: 60 minut

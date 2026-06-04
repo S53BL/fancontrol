@@ -1589,10 +1589,12 @@ async function saveFan(msgId='msgF5'){
     boostEvalMin:parseInt(document.getElementById('bEval').value)||2
   };
   const dndMax = parseInt(document.getElementById('fDndM').value) || 0;
-  const fanStart = parseInt(document.getElementById('fanStartPct').value) || 33;
-  if (dndMax > 0 && dndMax < fanStart) {
+  const fanStartPwm = parseInt(document.getElementById('fanStartPct').value) || 33;
+  // fanStartPct je %PWM — pretvorba v %user (identična _pwmToUser v fan.cpp)
+  const fanStartUser = fanStartPwm <= 27 ? 1 : Math.round(1 + (fanStartPwm - 27) * 99 / 73);
+  if (dndMax > 0 && dndMax < fanStartUser) {
     const m = document.getElementById(msgId);
-    m.textContent = 'DND max mora biti 0% ali vsaj ' + fanStart + '%!';
+    m.textContent = 'DND max mora biti 0% ali vsaj ' + fanStartUser + '%!';
     m.style.color = '#ff3b30';
     setTimeout(() => m.textContent = '', 5000);
     return Promise.resolve();
@@ -1896,7 +1898,7 @@ async function loadMon(){
 }
 async function saveMon(){
   const ports=[];
-  for(let i=0;i<8;i++){const pp=document.querySelector(`.mp[data-i="${i}"]`),pn=document.querySelector(`.mn[data-i="${i}"]`),pe=document.querySelector(`.me[data-i="${i}"]`);if(pp)ports.push({port:parseInt(pp.value)||0,name:pn?pn.value:'',enabled:pe?pe.checked:false});}
+  for(let i=0;i<9;i++){const pp=document.querySelector(`.mp[data-i="${i}"]`),pn=document.querySelector(`.mn[data-i="${i}"]`),pe=document.querySelector(`.me[data-i="${i}"]`);if(pp)ports.push({port:parseInt(pp.value)||0,name:pn?pn.value:'',enabled:pe?pe.checked:false});}
   const b={monitorIp:document.getElementById('mIp').value,wattThreshold:parseFloat(document.getElementById('mWth').value)||3.0,ports};
   const r=await fetch('/save/monitor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const m=document.getElementById('msgM');m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';setTimeout(()=>m.textContent='',3000);
@@ -2607,10 +2609,12 @@ void initWebserver() {
             }
             if (doc.containsKey("dndMaxPct")) {
                 uint8_t v = (uint8_t)constrain((int)(doc["dndMaxPct"] | 0), 0, 100);
-                // Veljavno: 0% (fan ugasnjen med DND) ALI >= fanStartPct (fan se lahko zažene)
-                // Prepovedano: 1 do fanStartPct-1 — hysteresis bi dvignil na fanStopPct,
-                // nastavljeno se ne bi ujemalo z dejanskim obnašanjem
-                if (v > 0 && v < settings.fanStartPct) {
+                // fanStartPct je %PWM — pretvorba v %user za primerjavo z dndMaxPct (%user)
+                // Formula: user = 1 + (pwm - 27) * 99 / 73  (identična _pwmToUser v fan.cpp)
+                uint8_t fanStartUser = (settings.fanStartPct <= 27) ? 1 :
+                    (uint8_t)(1.0f + (float)((int)settings.fanStartPct - 27) * 99.0f / 73.0f + 0.5f);
+                // Veljavno: 0% (fan ugasnjen med DND) ALI >= fanStartUser%user
+                if (v > 0 && v < fanStartUser) {
                     request->send(400, "application/json",
                         "{\"error\":\"DND max mora biti 0% ali vsaj toliko kot prag zagona ventilatorja\"}");
                     return;

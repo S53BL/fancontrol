@@ -184,8 +184,8 @@ void updateFan() {
     portEXIT_CRITICAL(&dataMux);
 
     if (temp == ERR_FLOAT) {
-        // Senzor ne deluje → varnostna vrednost nad stop pragom
-        uint8_t actualPct = applyHysteresisAndKick(settings.fanStartPct);
+        // Senzor ne deluje → varnostna vrednost: fanStartPct%PWM → pretvorba v %user
+        uint8_t actualPct = applyHysteresisAndKick(_pwmToUser(settings.fanStartPct));
         setFanPct(actualPct);
         return;
     }

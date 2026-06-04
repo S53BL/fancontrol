@@ -1,4 +1,4 @@
-// display.cpp — GxEPD2 WeAct 2.9" B/W, 4-conski layout, pokončna orientacija
+// display.cpp — GxEPD2 WeAct 2.9" B/W, pokončna orientacija
 #include "display.h"
 #include "config.h"
 #include "globals.h"
