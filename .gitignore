@@ -7,9 +7,10 @@
 # Claude Code
 .claude/
 
-# Dokumentacija (lokalna, ne v repo)
+# Dokumentacija (lokalna, ne v repo )
 Doc/
 doc/
+archive/
 
 # Agent navodila (lokalna, ne v repo)
 AGENT_*.md

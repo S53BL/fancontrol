@@ -124,6 +124,10 @@ static void initDefaults() {
     settings.fanPwmFreq   = FAN_PWM_FREQ;
     settings.fanPwmInvert = false;
 
+    settings.nanopiIntervalMs = NANOPI_FETCH_INTERVAL_DEFAULT;
+    strncpy(settings.nanopiIp, NANOPI_DEFAULT_IP, sizeof(settings.nanopiIp) - 1);
+    settings.nanopiIp[sizeof(settings.nanopiIp) - 1] = '\0';
+
     Serial.println("[Settings] Privzete vrednosti nastavljene");
 }
 

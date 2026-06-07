@@ -801,6 +801,19 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
       <div id="otaBar" style="height:100%;background:#00d4ff;width:0;transition:width 0.3s;border-radius:4px"></div></div>
       <div id="otaSt" style="margin-top:8px;font-size:12px;color:#00d4ff"></div>
     </div>
+    <!-- NanoPi klient -->
+    <div class="sec" style="margin-top:12px">
+      <h3>NanoPi Klient</h3>
+      <p style="font-size:11px;color:#555;margin-bottom:12px">Interval klicanja NanoPi R3S /api/fandata endpointa.</p>
+      <div class="ir"><span class="ik">NanoPi IP</span>
+        <input type="text" id="nanopiIp" maxlength="15" style="width:130px;background:#1a1a1a;border:1px solid #333;color:#e0e0e0;padding:4px 6px;border-radius:4px;font-size:12px">
+      </div>
+      <div class="ir" style="margin-top:8px"><span class="ik">Interval [s]</span>
+        <input type="number" id="nanopiInterval" min="10" max="3600" style="width:80px;background:#1a1a1a;border:1px solid #333;color:#e0e0e0;padding:4px 6px;border-radius:4px;font-size:12px">
+      </div>
+      <button class="btn bsm" style="margin-top:10px" onclick="saveNanopiSettings()">Shrani</button>
+      <span class="msg" id="msgNanopi"></span>
+    </div>
     <!-- Ponovni zagon -->
     <div class="sec" style="margin-top:12px">
       <h3>Ponovni zagon</h3>
@@ -888,7 +901,7 @@ function sw(i){
   if(i===2&&!_cL)loadCal();
   if(i===2&&!_mL)loadMon();
   if(i===2)loadLed();
-  if(i===3){fetchSys();fetchLog();}
+  if(i===3){fetchSys();fetchLog();loadNanopiSettings();}
   if(i===4)loadWifi();
 }
 
@@ -2098,6 +2111,29 @@ async function fetchSys(){
   try{const d=await(await fetch('/api/data')).json();buildSysInfo(d);}catch(e){}
 }
 
+// ── NanoPi klient ──────────────────────────────────────────────────
+async function saveNanopiSettings(){
+  const ip=document.getElementById('nanopiIp').value.trim();
+  const sec=parseInt(document.getElementById('nanopiInterval').value);
+  const m=document.getElementById('msgNanopi');
+  if(!ip||isNaN(sec)||sec<10||sec>3600){m.textContent='Napaka: IP ali interval neveljaven';m.style.color='#ff3b30';setTimeout(()=>m.textContent='',5000);return;}
+  try{
+    const r=await fetch('/save/nanopi',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({nanopiIp:ip,nanopiIntervalMs:sec*1000})});
+    m.textContent=r.ok?'Shranjeno!':'Napaka!';m.style.color=r.ok?'#30d158':'#ff3b30';
+  }catch(e){m.textContent='Napaka!';m.style.color='#ff3b30';}
+  setTimeout(()=>m.textContent='',3000);
+}
+async function loadNanopiSettings(){
+  try{
+    const d=await(await fetch('/api/nanopicfg')).json();
+    const ipEl=document.getElementById('nanopiIp');
+    const secEl=document.getElementById('nanopiInterval');
+    if(ipEl&&d.nanopiIp)ipEl.value=d.nanopiIp;
+    if(secEl&&d.nanopiIntervalMs)secEl.value=Math.round(d.nanopiIntervalMs/1000);
+  }catch(e){}
+}
+
 // ── RAM Log s filtrom ──────────────────────────────────────────────
 let _allLogs=[];
 async function fetchLog(){
@@ -2225,6 +2261,13 @@ static void getTimeStr(char* buf, size_t sz) {
     }
 }
 
+// Helper: CORS headers za vse /api/* endpointe
+static void addCorsHeaders(AsyncWebServerResponse* response) {
+    response->addHeader("Access-Control-Allow-Origin",  "*");
+    response->addHeader("Access-Control-Allow-Methods", "GET");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 // =====================================================================
 // initWebserver — WiFi, NTP, mDNS, registracija endpointov
 // =====================================================================
@@ -2328,7 +2371,9 @@ void initWebserver() {
 
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- GET /api/history?from=<ts>&to=<ts>[&maxPts=<n>][&format=csv] → JSON ali CSV ---
@@ -2372,6 +2417,7 @@ void initWebserver() {
                          p.temp, p.hum, p.watt, (unsigned)p.fanPct);
                 resp->print(line);
             }
+            addCorsHeaders(resp);
             request->send(resp);
             LOG_INFO("WEB", "/api/history?format=csv — %d tock", cnt);
             return;
@@ -2464,6 +2510,7 @@ void initWebserver() {
         }
 
         resp->print("]");
+        addCorsHeaders(resp);
         request->send(resp);
     });
 
@@ -2517,6 +2564,7 @@ void initWebserver() {
                      p.temp, p.hum, p.watt, (unsigned)p.fanPct);
             resp->print(line);
         }
+        addCorsHeaders(resp);
         request->send(resp);
         LOG_INFO("WEB", "/api/history/csv — %d tock, ime: %s", cnt, fname);
     });
@@ -2550,6 +2598,7 @@ void initWebserver() {
                          e.time, lvl, e.tag, e.msg);
                 resp->print(line);
             }
+            addCorsHeaders(resp);
             request->send(resp);
             LOG_INFO("WEB", "/api/log?format=txt — %d vnosov", count);
             return;
@@ -2570,7 +2619,9 @@ void initWebserver() {
         }
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- GET /api/log/all → streaming JSON array VSEH vnosov (za download) ---
@@ -2591,6 +2642,7 @@ void initWebserver() {
             resp->print(s);
         }
         resp->print("]");
+        addCorsHeaders(resp);
         request->send(resp);
     });
 
@@ -2629,6 +2681,7 @@ void initWebserver() {
                      e.time, lvl, e.tag, e.msg);
             resp->print(line);
         }
+        addCorsHeaders(resp);
         request->send(resp);
         LOG_INFO("WEB", "/api/log/download — %d vnosov, ime: %s", count, fname);
     });
@@ -2640,7 +2693,9 @@ void initWebserver() {
         doc["pct"]    = getManualPct();
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /api/fan/manual → nastavi ročni način ---
@@ -2703,7 +2758,9 @@ void initWebserver() {
         doc["boostLearnSec"]      = settings.boostLearnMs / 1000UL;
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- GET /api/calsettings → za pre-fill Tab 2 ---
@@ -2718,7 +2775,9 @@ void initWebserver() {
         doc["fanPwmInvert"] = settings.fanPwmInvert;
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /save/fan → shrani fan nastavitve v NVS ---
@@ -2828,7 +2887,9 @@ void initWebserver() {
 
             saveSettings();
             LOG_INFO("WEB", "/save/fan OK");
-            request->send(200, "application/json", "{\"status\":\"OK\"}");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
         }
     );
 
@@ -2836,7 +2897,9 @@ void initWebserver() {
     server.on("/adapt/reset", HTTP_POST, [](AsyncWebServerRequest *request){
         adaptReset();
         LOG_INFO("WEB", "/adapt/reset — ucenje ponastavljeno");
-        request->send(200, "application/json", "{\"status\":\"OK\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /save/cal → shrani kalibracija + WiFi v NVS ---
@@ -2882,7 +2945,9 @@ void initWebserver() {
             saveSettings();
             // WiFi sprememba velja ob resetu — ne reconnectamo takoj
             LOG_INFO("WEB", "/save/cal OK (WiFi posodobitev ob resetu)");
-            request->send(200, "application/json", "{\"status\":\"OK\"}");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
         }
     );
 
@@ -2917,8 +2982,128 @@ void initWebserver() {
         }
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
+
+    // --- GET /api/nanopi → podatki za NanoPi Security Dashboard ---
+    server.on("/api/nanopi", HTTP_GET, [](AsyncWebServerRequest *request){
+        StaticJsonDocument<1024> doc;
+
+        portENTER_CRITICAL(&dataMux);
+        float temp    = sensorData.temp;
+        float hum     = sensorData.hum;
+        float volt    = sensorData.volt;
+        float amp     = sensorData.amp;
+        uint8_t fanPct = sensorData.fanPct;
+        uint8_t err   = sensorData.err;
+        bool dnd      = sensorData.dndActive;
+        bool manual   = sensorData.manualMode;
+        float pTemp   = peakTemp;
+        float pWatt   = sensorData.peakWatt;
+        uint8_t pFan  = peakFan;
+        portEXIT_CRITICAL(&dataMux);
+
+        MonitorResult mr = monitorGetResult();
+
+        doc["ts"] = (uint32_t)UTC.now();
+
+        JsonObject sensor = doc.createNestedObject("sensor");
+        sensor["temp"]    = serialized(String(temp, 1));
+        sensor["hum"]     = serialized(String(hum, 1));
+        sensor["volt"]    = serialized(String(volt, 2));
+        sensor["amp"]     = serialized(String(amp, 3));
+        sensor["fan_pct"] = fanPct;
+        sensor["err"]     = err;
+
+        JsonObject peaks = doc.createNestedObject("peaks");
+        peaks["temp"] = serialized(String(pTemp, 1));
+        peaks["watt"] = serialized(String(pWatt, 1));
+        peaks["fan"]  = pFan;
+
+        JsonObject server_obj = doc.createNestedObject("server");
+        server_obj["powered"]             = mr.powered;
+        server_obj["all_ok"]              = mr.allPortsOk;
+        server_obj["ports_ok"]            = mr.portOkCount;
+        server_obj["ports_total_enabled"] = mr.portCount;
+
+        JsonArray ports = server_obj.createNestedArray("ports");
+        {
+            PortEntry* pe = monitorGetPorts();
+            portENTER_CRITICAL(&dataMux);
+            for (int i = 0; i < MONITOR_MAX_PORTS; i++) {
+                JsonObject p = ports.createNestedObject();
+                p["port"]    = pe[i].port;
+                p["name"]    = pe[i].name;
+                p["enabled"] = pe[i].enabled;
+                p["ok"]      = pe[i].lastOk;
+            }
+            portEXIT_CRITICAL(&dataMux);
+        }
+
+        JsonObject status = doc.createNestedObject("status");
+        status["dnd"]    = dnd;
+        status["manual"] = manual;
+        status["rssi"]   = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+
+        String resp;
+        serializeJson(doc, resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
+    });
+
+    // --- GET /api/nanopicfg → NanoPi klient nastavitve ---
+    server.on("/api/nanopicfg", HTTP_GET, [](AsyncWebServerRequest *request){
+        StaticJsonDocument<128> doc;
+        portENTER_CRITICAL(&dataMux);
+        doc["nanopiIp"]         = settings.nanopiIp;
+        doc["nanopiIntervalMs"] = settings.nanopiIntervalMs;
+        portEXIT_CRITICAL(&dataMux);
+        String resp;
+        serializeJson(doc, resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
+    });
+
+    // --- POST /save/nanopi → shrani NanoPi klient nastavitve ---
+    server.on("/save/nanopi", HTTP_POST,
+        [](AsyncWebServerRequest *request){},
+        NULL,
+        [](AsyncWebServerRequest *request, uint8_t *data, size_t len,
+           size_t index, size_t total){
+            static char _nanBuf[256];
+            static size_t _nanLen = 0;
+            if (index == 0) { _nanLen = 0; memset(_nanBuf, 0, sizeof(_nanBuf)); }
+            size_t copyLen = min(len, sizeof(_nanBuf) - 1 - _nanLen);
+            memcpy(_nanBuf + _nanLen, data, copyLen);
+            _nanLen += copyLen;
+            if (index + len != total) return;
+
+            StaticJsonDocument<128> doc;
+            if (deserializeJson(doc, _nanBuf)) {
+                request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                return;
+            }
+            portENTER_CRITICAL(&dataMux);
+            if (doc.containsKey("nanopiIp")) {
+                const char* v = doc["nanopiIp"];
+                if (v) strncpy(settings.nanopiIp, v, sizeof(settings.nanopiIp) - 1);
+            }
+            if (doc.containsKey("nanopiIntervalMs")) {
+                uint32_t v = doc["nanopiIntervalMs"];
+                if (v >= 10000UL && v <= 3600000UL) settings.nanopiIntervalMs = v;
+            }
+            portEXIT_CRITICAL(&dataMux);
+            saveSettings();
+            LOG_INFO("WEB", "/save/nanopi OK");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
+        }
+    );
 
     // --- GET /api/monitorsettings → za pre-fill Tab 2 ---
     server.on("/api/monitorsettings", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -2948,7 +3133,9 @@ void initWebserver() {
         }
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /save/monitor → shrani monitor nastavitve v NVS ---
@@ -3001,7 +3188,9 @@ void initWebserver() {
             saveSettings();
             monitorInit();
             LOG_INFO("WEB", "/save/monitor OK");
-            request->send(200, "application/json", "{\"status\":\"OK\"}");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
         }
     );
 
@@ -3067,7 +3256,9 @@ void initWebserver() {
             LOG_INFO("WEB", "/save/pwmcal — freq=%lu invert=%s",
                      (unsigned long)settings.fanPwmFreq,
                      settings.fanPwmInvert ? "ON" : "off");
-            request->send(200, "application/json", "{\"status\":\"OK\"}");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
         }
     );
 
@@ -3077,7 +3268,9 @@ void initWebserver() {
         doc["enabled"] = settings.ledEnabled;
         String resp;
         serializeJson(doc, resp);
-        request->send(200, "application/json", resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /api/led → nastavi stanje LED ---
@@ -3120,7 +3313,9 @@ void initWebserver() {
 
     // --- POST /api/restart → soft reset z 500ms zakasnitvijo ---
     server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request){
-        request->send(200, "application/json", "{\"status\":\"restarting\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"restarting\"}");
+        addCorsHeaders(response);
+        request->send(response);
         LOG_INFO("WEB", "/api/restart — zahtevam restart");
         delay(500);
         ESP.restart();
@@ -3130,7 +3325,9 @@ void initWebserver() {
     server.on("/api/settings/reset", HTTP_POST, [](AsyncWebServerRequest *request){
         LOG_INFO("WEB", "/api/settings/reset — ponastavitev na privzete vrednosti");
         resetSettings();
-        request->send(200, "application/json", "{\"status\":\"reset\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"reset\"}");
+        addCorsHeaders(response);
+        request->send(response);
         delay(500);
         ESP.restart();
     });
@@ -3145,7 +3342,9 @@ void initWebserver() {
         prefs.putFloat(PEAK_TEMP_NVS_KEY, peakTemp);
         prefs.putUChar(PEAK_FAN_NVS_KEY, peakFan);
         prefs.end();
-        request->send(200, "application/json", "{\"status\":\"ok\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"ok\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- GET /api/wifi/status → trenutno stanje + scan rezultati ---
@@ -3174,6 +3373,7 @@ void initWebserver() {
                          wifiScanResults[i].isConnected ? "true" : "false");
         }
         resp->print("]}");
+        addCorsHeaders(resp);
         request->send(resp);
     });
 
@@ -3198,6 +3398,7 @@ void initWebserver() {
                          e.ssid, e.bssid, e.rssiPre, e.rssiPost);
         }
         resp->print("]");
+        addCorsHeaders(resp);
         request->send(resp);
     });
 
@@ -3215,6 +3416,7 @@ void initWebserver() {
                          hasPass ? "true" : "false");
         }
         resp->print("]}");
+        addCorsHeaders(resp);
         request->send(resp);
     });
 
@@ -3287,7 +3489,9 @@ void initWebserver() {
 
             saveWifiSlots();
             LOG_INFO("WEB", "/api/wifi/slots OK — %d slotov shranjenih", idx);
-            request->send(200, "application/json", "{\"status\":\"OK\"}");
+            AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+            addCorsHeaders(response);
+            request->send(response);
         }
     );
 
@@ -3309,14 +3513,18 @@ void initWebserver() {
                                rssiPre, WiFi.RSSI());
             LOG_INFO("WIFI", "Ročni reconnect OK — RSSI: %d dBm", WiFi.RSSI());
         }
-        request->send(200, "application/json", "{\"status\":\"OK\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /api/wifi/scan → sproži async scan (ne blokira AsyncWebServer) ---
     server.on("/api/wifi/scan", HTTP_POST, [](AsyncWebServerRequest *request){
         LOG_INFO("WEB", "/api/wifi/scan — zahtevam async scan...");
         wifiScanRequested = true;
-        request->send(200, "application/json", "{\"status\":\"scanning\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"scanning\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /api/wifi/connect?ssid=X → poveži na specifičen znan SSID ---
@@ -3340,7 +3548,9 @@ void initWebserver() {
         LOG_INFO("WEB", "/api/wifi/connect — zahtevam: '%s'", ssid.c_str());
         strncpy(wifiConnectTarget, ssid.c_str(), 31); wifiConnectTarget[31] = '\0';
         wifiConnectRequested = true;
-        request->send(200, "application/json", "{\"status\":\"connecting\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"connecting\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- POST /api/factory_reset → ponastavi WiFi slote na factory defaults ---
@@ -3370,7 +3580,9 @@ void initWebserver() {
         }
         saveWifiSlots();
         LOG_INFO("WEB", "/api/factory_reset OK — %d slotov ponastavljenih", WIFI_NETWORK_COUNT);
-        request->send(200, "application/json", "{\"status\":\"OK\"}");
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+        addCorsHeaders(response);
+        request->send(response);
     });
 
     // --- GET /about → tehnična referenčna stran ---

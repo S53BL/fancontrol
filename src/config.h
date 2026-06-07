@@ -135,7 +135,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.2.1"
+#define FW_VERSION          "1.3.0"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
@@ -169,7 +169,7 @@ enum ErrorFlag : uint8_t {
 #define WX_ICON_LINESIZE        2           // Debelina črt ikon
 
 // --- Mini PC Monitor ---
-#define MONITOR_TCP_TIMEOUT_MS     500      // TCP connect timeout [ms]
+#define MONITOR_TCP_TIMEOUT_MS     2000     // TCP connect timeout [ms] — 2000ms preprečuje false negative
 #define MONITOR_MAX_PORTS          9        // Max portov v nastavitvah (3x3 grid)
 #define MONITOR_RUN_INTERVAL       300000UL // Skeniranje portov: 5 min
 
@@ -198,3 +198,10 @@ enum ErrorFlag : uint8_t {
 
 // --- WiFi omrežja ---
 #define WIFI_SLOT_COUNT             5           // Število WiFi slotov
+
+// --- NanoPi klient ---
+#define NANOPI_FETCH_INTERVAL_DEFAULT  60000UL  // Privzeti interval klica NanoPi [ms]
+#define NANOPI_HTTP_TIMEOUT_MS         5000      // HTTP timeout za klic NanoPi [ms]
+#define NANOPI_STALE_THRESHOLD_MS      300000UL  // 5 minut — podatki so zastareli [ms]
+#define NANOPI_FAIL_THRESHOLD          5          // Zaporednih napak preden prikaže opozorilo
+#define NANOPI_DEFAULT_IP              "192.168.2.9"

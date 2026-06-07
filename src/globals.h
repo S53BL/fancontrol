@@ -96,6 +96,10 @@ struct Settings {
     uint32_t fanPwmFreq;    // PWM frekvenca ventilatorja [Hz], privzeto 25000
     bool     fanPwmInvert;  // Invertiran delovni cikel (HIGH=stop, LOW=tece), privzeto false
 
+    // NanoPi klient
+    uint32_t nanopiIntervalMs;  // Interval klica NanoPi [ms], privzeto NANOPI_FETCH_INTERVAL_DEFAULT
+    char     nanopiIp[16];      // IP naslov NanoPi, privzeto NANOPI_DEFAULT_IP
+
     // WiFi omrežja — runtime lista (5 slotov, NVS)
     WifiSlot wifiSlots[WIFI_SLOT_COUNT];
 };

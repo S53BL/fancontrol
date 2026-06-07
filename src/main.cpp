@@ -14,6 +14,7 @@
 #include "webserver.h"
 #include "graph_store.h"
 #include "monitor.h"
+#include "nanopi_client.h"
 #include "fan_adapt.h"
 #include "fan_boost.h"
 #include <WiFi.h>
@@ -63,6 +64,8 @@ void setup() {
     // 6b. Monitor init
     monitorInit();
     LOG_INFO("BOOT", "Monitor init OK");
+    nanopiClientInit();
+    LOG_INFO("BOOT", "NanoPi klient init OK");
 
     // 7. Senzorji — z zamudo za stabilizacijo napajanja
     delay(BOOT_SENSOR_DELAY_MS);
@@ -237,6 +240,9 @@ void loop() {
         lastMonitorMs = now;
         monitorRun();
     }
+
+    // NanoPi klient — periodični HTTP fetch
+    nanopiClientLoop();
 
     // Dnevni recalc sunrise/sunset (enkrat na dan ob spremembi datuma)
     if (timeSynced) {
