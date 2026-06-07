@@ -40,7 +40,7 @@ static void _doFetch() {
 
     char url[48];
     portENTER_CRITICAL(&dataMux);
-    snprintf(url, sizeof(url), "http://%s/api/fandata", settings.nanopiIp);
+    snprintf(url, sizeof(url), "http://%s/cgi-bin/api_nanostats.sh", settings.nanopiIp);
     portEXIT_CRITICAL(&dataMux);
 
     HTTPClient http;
@@ -64,7 +64,7 @@ static void _doFetch() {
     String payload = http.getString();
     http.end();
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err) {
         LOG_WARN("NANOPI", "JSON parse napaka: %s", err.c_str());
@@ -92,6 +92,23 @@ static void _doFetch() {
     fresh.valid               = true;
     fresh.stale               = false;
     fresh.failCount           = 0;
+
+    // Parse ports[] — prisoten samo ob port-check incidentu
+    fresh.portsCount = 0;
+    JsonArray portsArr = doc["ports"];
+    if (portsArr) {
+        for (JsonObject p : portsArr) {
+            if (fresh.portsCount >= 9) break;
+            int idx = fresh.portsCount;
+            fresh.ports[idx].port         = p["port"]          | (uint16_t)0;
+            fresh.ports[idx].fancontrolOk = p["fancontrol_ok"] | false;
+            fresh.ports[idx].nanopiOk     = p["nanopi_ok"]     | false;
+            const char* nm = p["name"] | "";
+            strncpy(fresh.ports[idx].name, nm, sizeof(fresh.ports[idx].name) - 1);
+            fresh.ports[idx].name[sizeof(fresh.ports[idx].name) - 1] = '\0';
+            fresh.portsCount++;
+        }
+    }
 
     portENTER_CRITICAL(&dataMux);
     _nanopiData = fresh;

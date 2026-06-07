@@ -17,6 +17,15 @@ struct NanoPiData {
     bool     stale;               // true = podatki starejši od NANOPI_STALE_THRESHOLD_MS
     bool     valid;               // false = še ni bilo uspešnega fetcha
     uint8_t  failCount;           // Zaporednih napak
+
+    // Per-port cross-check (samo ob portu ki je padel po mnenju FanControl)
+    struct {
+        uint16_t port;
+        char     name[12];
+        bool     fancontrolOk;
+        bool     nanopiOk;
+    } ports[9];              // fiksna tabela, max MONITOR_MAX_PORTS
+    uint8_t portsCount;      // koliko elementov je validnih (0 = normalno delovanje)
 };
 
 void         nanopiClientInit();

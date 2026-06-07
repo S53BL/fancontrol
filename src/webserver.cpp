@@ -13,6 +13,7 @@
 #include "fan.h"
 #include "monitor.h"
 #include "led.h"
+#include "nanopi_client.h"
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
@@ -783,6 +784,16 @@ td{padding:4px 7px;border-bottom:1px solid #161616}
         <table id="logtbl"><tr><th>Čas</th><th>Lvl</th><th>Tag</th><th>Sporočilo</th></tr></table>
       </div>
     </div>
+    <!-- NanoPi STATUS -->
+    <div class="sec" style="margin-top:12px">
+      <h3>NanoPi STATUS
+        &nbsp;<span id="nanopiStaleTag" style="display:none;font-size:10px;color:#ff9500;font-weight:normal">● ZASTARELO</span>
+        &nbsp;<span id="nanopiFailTag"  style="display:none;font-size:10px;color:#ff3b30;font-weight:normal">● NAPAKA</span>
+      </h3>
+      <div id="nanopiStatusBox">
+        <div style="color:#555;font-size:11px">Čakam na prve podatke...</div>
+      </div>
+    </div>
   </div>
   <!-- DESNO: Sistemske informacije -->
   <div class="sinf">
@@ -901,7 +912,7 @@ function sw(i){
   if(i===2&&!_cL)loadCal();
   if(i===2&&!_mL)loadMon();
   if(i===2)loadLed();
-  if(i===3){fetchSys();fetchLog();loadNanopiSettings();}
+  if(i===3){fetchSys();fetchLog();loadNanopiSettings();refreshNanopiStatus();}
   if(i===4)loadWifi();
 }
 
@@ -953,6 +964,7 @@ async function refreshData(){
         drawFanCurveFromCache();
       }
     }
+    if(atab===3) refreshNanopiStatus();
   }catch(e){}
 }
 setInterval(refreshData,10000);
@@ -2107,6 +2119,70 @@ function buildSysInfo(d){
   ];
   si.innerHTML=rows.map(([k,v])=>`<div class="ir"><span class="ik">${k}</span><span class="iv">${v}</span></div>`).join('');
 }
+// ── NanoPi Status prikaz ───────────────────────────────────────────
+async function refreshNanopiStatus(){
+  try{
+    const d=await(await fetch('/api/nanopi-status')).json();
+    const box=document.getElementById('nanopiStatusBox');
+    const staleTag=document.getElementById('nanopiStaleTag');
+    const failTag=document.getElementById('nanopiFailTag');
+    if(!box)return;
+
+    if(staleTag) staleTag.style.display=d.stale?'inline':'none';
+    if(failTag)  failTag.style.display=(d.fail_count>=5)?'inline':'none';
+
+    if(!d.valid){
+      box.innerHTML='<div style="color:#555;font-size:11px">Čakam na prve podatke...</div>';
+      return;
+    }
+
+    // Bar helper: vrne SVG bar + vrednost
+    function bar(pct,color){
+      const w=Math.min(pct,120);
+      return `<span style="display:inline-block;width:80px;height:8px;background:#1a1a1a;border-radius:3px;vertical-align:middle;margin-right:6px"><span style="display:block;height:8px;width:${w/120*100}%;background:${color};border-radius:3px;transition:width 0.4s"></span></span>`;
+    }
+
+    // Timestamp zadnjega fetcha
+    const tsFmt = d.ts ? new Date(d.ts*1000).toLocaleTimeString('sl-SI',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '--';
+
+    // server_ok barva
+    const srvColor = d.system.server_ok ? '#30d158' : '#ff3b30';
+    const srvTxt   = d.system.server_ok ? 'OK' : 'NEDOSEGLJIV';
+    const banColor = d.system.banip_running ? '#30d158' : '#ff9500';
+
+    // Ports[] — samo če ni prazen
+    let portsHtml = '';
+    if(d.ports && d.ports.length>0){
+      portsHtml = '<div style="margin-top:6px;font-size:10px;color:#888;border-top:1px solid #2a2a2a;padding-top:6px">';
+      portsHtml += '<div style="margin-bottom:3px;color:#555">Cross-check portov:</div>';
+      for(const p of d.ports){
+        const fcCol = p.fancontrol_ok ? '#30d158' : '#ff3b30';
+        const npCol = p.nanopi_ok     ? '#30d158' : '#ff3b30';
+        portsHtml += `<div style="margin:2px 0">`+
+          `<span style="color:#888;width:60px;display:inline-block">${p.name}:${p.port}</span>`+
+          `<span style="color:${fcCol}">FC</span>`+
+          `<span style="color:#555;margin:0 3px">|</span>`+
+          `<span style="color:${npCol}">NP</span>`+
+          `</div>`;
+      }
+      portsHtml += '</div>';
+    }
+
+    box.innerHTML=
+      `<div class="ir"><span class="ik">Sirius</span><span class="iv" style="color:${srvColor}">${srvTxt}</span></div>`+
+      `<div class="ir"><span class="ik">banIP</span><span class="iv" style="color:${banColor}">${d.system.banip_running?'teče':'ni aktiven'}</span></div>`+
+      `<div class="ir" style="margin-top:4px"><span class="ik">Promet</span><span class="iv">`+
+        bar(d.network.bar_pct,'#5b9bd5')+
+        `${d.network.current_mbits} / ${d.network.peak_mbits} Mbit/s`+
+      `</span></div>`+
+      `<div class="ir"><span class="ik">Napadi/h</span><span class="iv">`+
+        bar(d.attacks.bar_pct,'#ff9500')+
+        `${d.attacks.current_ph} / ${d.attacks.peak_ph}`+
+      `</span></div>`+
+      `<div class="ir" style="margin-top:4px"><span class="ik">Zadnji fetch</span><span class="iv" style="color:#555;font-size:11px">${tsFmt}</span></div>`+
+      portsHtml;
+  }catch(e){}
+}
 async function fetchSys(){
   try{const d=await(await fetch('/api/data')).json();buildSysInfo(d);}catch(e){}
 }
@@ -3061,6 +3137,47 @@ void initWebserver() {
         doc["nanopiIp"]         = settings.nanopiIp;
         doc["nanopiIntervalMs"] = settings.nanopiIntervalMs;
         portEXIT_CRITICAL(&dataMux);
+        String resp;
+        serializeJson(doc, resp);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
+        addCorsHeaders(response);
+        request->send(response);
+    });
+
+    // --- GET /api/nanopi-status → zadnji prejeti NanoPi podatki za Tab Sistem ---
+    server.on("/api/nanopi-status", HTTP_GET, [](AsyncWebServerRequest *request){
+        NanoPiData nd = nanopiGetData();
+        StaticJsonDocument<768> doc;
+
+        doc["valid"]      = nd.valid;
+        doc["stale"]      = nd.stale;
+        doc["fail_count"] = nd.failCount;
+        doc["ts"]         = nd.ts;
+
+        JsonObject net = doc.createNestedObject("network");
+        net["current_mbits"] = serialized(String(nd.networkCurrentMbits, 2));
+        net["peak_mbits"]    = serialized(String(nd.networkPeakMbits, 2));
+        net["bar_pct"]       = nd.networkBarPct;
+
+        JsonObject atk = doc.createNestedObject("attacks");
+        atk["current_ph"] = nd.attacksCurrentPh;
+        atk["peak_ph"]    = nd.attacksPeakPh;
+        atk["bar_pct"]    = nd.attacksBarPct;
+
+        JsonObject sys = doc.createNestedObject("system");
+        sys["banip_running"]     = nd.banipRunning;
+        sys["banip_last_reload"] = nd.banipLastReload;
+        sys["server_ok"]         = nd.serverOk;
+
+        JsonArray ports = doc.createNestedArray("ports");
+        for (int i = 0; i < nd.portsCount; i++) {
+            JsonObject p = ports.createNestedObject();
+            p["port"]          = nd.ports[i].port;
+            p["name"]          = nd.ports[i].name;
+            p["fancontrol_ok"] = nd.ports[i].fancontrolOk;
+            p["nanopi_ok"]     = nd.ports[i].nanopiOk;
+        }
+
         String resp;
         serializeJson(doc, resp);
         AsyncWebServerResponse* response = request->beginResponse(200, "application/json", resp);
