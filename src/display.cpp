@@ -204,9 +204,9 @@ void updateDisplay(bool fullRefresh) {
         display.fillScreen(GxEPD_WHITE);
 
         // ── Ločilne črte ──────────────────────────────────────────
-        display.drawFastHLine(4,  65, 120, GxEPD_BLACK);  // C1/C2
-        display.drawFastHLine(4, 194, 120, GxEPD_BLACK);  // C2/C3
-        display.drawFastHLine(4, 295, 120, GxEPD_BLACK);  // spodnja
+        display.drawFastHLine(4,  82, 120, GxEPD_BLACK);  // C1/C2
+        display.drawFastHLine(4, 196, 120, GxEPD_BLACK);  // C2/C3
+        // Spodnja črta C3 se NE riše — y=296 je izven zaslona (EPD_HEIGHT=296, veljavno 0–295)
 
         // ══════════════════════════════════════════════════════════
         // CONA 1 — Čas, sunrise/sunset, datum, zunanja temp/vlaga, wx ikona
@@ -270,221 +270,174 @@ void updateDisplay(bool fullRefresh) {
                 u8g2Fonts.print("\xC2\xB0" "C");
             }
 
-            // Zunanja vlaga — logisoso16 (rahlo pod temp)
-            if (!weatherData.valid) {
-                u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 94);
-                u8g2Fonts.print("--");
-                u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(22, 94);
-                u8g2Fonts.print("%");
-            } else {
-                snprintf(buf, sizeof(buf), "%d", (int)weatherData.outHum);
-                u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 94);
-                u8g2Fonts.print(buf);
-                int16_t hw = u8g2Fonts.getUTF8Width(buf);
-                u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(4 + hw + 2, 94);
-                u8g2Fonts.print("%");
-            }
         }
 
-        // Wx ikona (desno, sc=8 — povečano za ~20% iz sc=7)
+        // Wx ikona (desno, sc=6)
         if (weatherData.valid) {
-            wxDrawConditionsScaled(92, 75, weatherData.wxCode, weatherData.isNight, 8, WX_ICON_LINESIZE);
+            wxDrawConditionsScaled(92, 68, weatherData.wxCode, weatherData.isNight, 6, WX_ICON_LINESIZE);
         }
 
         // ══════════════════════════════════════════════════════════
-        // CONA 2 — FanControl: temp/vlaga/napetost/tok + bara
-        // y: 66–192
+        // CONA 2 — FanControl: temp+napetost, ventilator, poraba
+        // y: 84–195  (111px)
         // ══════════════════════════════════════════════════════════
+        // PRERAČUN PRED IZPISOM:
+        //   label y=96:  84+3(gap_start)+9(ascent) = 96                  ✓
+        //   val   y=111: 96+2(gap)+13(ascent) = 111                      ✓
+        //   vent_label y=125: 111+2(spodnji)+3(gap)+9 = 125              ✓
+        //   vent_bar   y=127: 125+2 = 127                                ✓
+        //   vent_val   y=141: 127+14(bar_h) = 141                        ✓
+        //   vent_peak  y=152: 141+2+9 = 152                              ✓
+        //   por_label  y=166: 152+2(spodnji)+3(gap)+9 = 166              ✓
+        //   por_bar    y=168: 166+2 = 168                                ✓
+        //   por_val    y=182: 168+14 = 182                               ✓
+        //   por_peak   y=193: 182+2+9 = 193                              ✓
+        //   C2 konec:   193+2 = 195  → črta y=196                       ✓
         {
             bool shtErr = (sensorData.err & ERR_SHT30);
             bool inaErr = (sensorData.err & ERR_INA219);
             char buf[12];
 
-            // ── 4-vrednostni blok: TEMP+VLAGA (vr.1) + NAPETOST+TOK (vr.2) ──
-
-            // Labeli vrstica 1 — y=78
+            // ── Labeli: TEMP levo, NAPETOST desno — y=96 ──────────────────
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4,  78); u8g2Fonts.print("TEMP");
-            u8g2Fonts.setCursor(68, 78); u8g2Fonts.print("VLAGA");
+            u8g2Fonts.setCursor(4,  96); u8g2Fonts.print("TEMP");
+            u8g2Fonts.setCursor(68, 96); u8g2Fonts.print("NAPETOST");
 
-            // Vrednosti vrstica 1 — y=91 (logisoso16)
-            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+            // ── Vrednosti logo16 — y=111 ───────────────────────────────────
+            // Temperatura
             if (shtErr) snprintf(buf, sizeof(buf), "--.-");
             else        snprintf(buf, sizeof(buf), "%.1f", sensorData.temp);
-            u8g2Fonts.setCursor(4, 91); u8g2Fonts.print(buf);
+            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+            u8g2Fonts.setCursor(4, 111); u8g2Fonts.print(buf);
             int16_t tw = u8g2Fonts.getUTF8Width(buf);
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4 + tw + 1, 91); u8g2Fonts.print("\xC2\xB0" "C");
+            u8g2Fonts.setCursor(4 + tw + 1, 111); u8g2Fonts.print("\xC2\xB0" "C");
 
-            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-            if (shtErr) snprintf(buf, sizeof(buf), "---");
-            else        snprintf(buf, sizeof(buf), "%d", (int)roundf(sensorData.hum));
-            u8g2Fonts.setCursor(68, 91); u8g2Fonts.print(buf);
-            int16_t hw = u8g2Fonts.getUTF8Width(buf);
-            u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(68 + hw + 1, 91); u8g2Fonts.print("%");
-
-            // Labeli vrstica 2 — y=101
-            u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4,  101); u8g2Fonts.print("NAPETOST");
-            u8g2Fonts.setCursor(68, 101); u8g2Fonts.print("TOK");
-
-            // Vrednosti vrstica 2 — y=114 (logisoso16)
-            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+            // Napetost
             if (inaErr) snprintf(buf, sizeof(buf), "--.-");
             else        snprintf(buf, sizeof(buf), "%.1f", sensorData.volt);
-            u8g2Fonts.setCursor(4, 114); u8g2Fonts.print(buf);
+            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
+            u8g2Fonts.setCursor(68, 111); u8g2Fonts.print(buf);
             int16_t vw = u8g2Fonts.getUTF8Width(buf);
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4 + vw + 1, 114); u8g2Fonts.print("V");
+            u8g2Fonts.setCursor(68 + vw + 1, 111); u8g2Fonts.print("V");
 
-            u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-            if (inaErr) snprintf(buf, sizeof(buf), "--.-");
-            else        snprintf(buf, sizeof(buf), "%.2f", sensorData.amp);
-            u8g2Fonts.setCursor(68, 114); u8g2Fonts.print(buf);
-            int16_t aw = u8g2Fonts.getUTF8Width(buf);
+            // ── VENTILATOR bar — label y=125, bar y=127–141 ────────────────
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(68 + aw + 1, 114); u8g2Fonts.print("A");
-
-            // ── VENTILATOR bar ────────────────────────────────────────────
-            // label y=126, bar y=128 (w=84, h=14), val y=142, peak y=153
-            u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4, 126); u8g2Fonts.print("VENTILATOR");
-
+            u8g2Fonts.setCursor(4, 125); u8g2Fonts.print("VENTILATOR");
             {
-                const int16_t bx = 4, by = 128, bw = 84, bh = 14;
+                const int16_t bx=4, by=127, bw=84, bh=14;
                 int16_t fill = (int16_t)((int32_t)bw * sensorData.fanPct / 100);
                 drawFancyBar(bx, by, bw, bh, fill);
-
-                char pctBuf[6];
-                snprintf(pctBuf, sizeof(pctBuf), "%d%%", sensorData.fanPct);
+                char pBuf[6];
+                snprintf(pBuf, sizeof(pBuf), "%d%%", sensorData.fanPct);
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(91, 142); u8g2Fonts.print(pctBuf);
+                u8g2Fonts.setCursor(91, 141); u8g2Fonts.print(pBuf);
             }
-
-            // peak pod barom — y=153
+            // Peak — y=152
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
             {
-                char pkBuf[10];
-                snprintf(pkBuf, sizeof(pkBuf), "peak %d%%", peakFan);
-                u8g2Fonts.setCursor(4, 153); u8g2Fonts.print(pkBuf);
+                char pk[10];
+                snprintf(pk, sizeof(pk), "peak %d%%", peakFan);
+                u8g2Fonts.setCursor(4, 152); u8g2Fonts.print(pk);
             }
 
-            // ── PORABA bar ────────────────────────────────────────────────
-            // label y=165, bar y=167 (w=84, h=14), val y=181, peak y=192
+            // ── PORABA bar — label y=166, bar y=168–182 ───────────────────
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4, 165); u8g2Fonts.print("PORABA");
-
+            u8g2Fonts.setCursor(4, 166); u8g2Fonts.print("PORABA");
             {
-                const int16_t bx = 4, by = 167, bw = 84, bh = 14;
+                const int16_t bx=4, by=168, bw=84, bh=14;
                 float peak = sensorData.peakWatt;
                 if (peak < PEAK_WATT_MIN_FLOOR) peak = PEAK_WATT_DEFAULT;
                 float ratio = inaErr ? 0.0f : (sensorData.watt / peak);
                 if (ratio > 1.0f) ratio = 1.0f;
                 int16_t fill = (int16_t)(bw * ratio);
                 drawFancyBar(bx, by, bw, bh, fill);
-
-                // vrednost desno — cela W + decimala (logisoso16)
                 if (inaErr) {
                     u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                    u8g2Fonts.setCursor(91, 181); u8g2Fonts.print("--W");
+                    u8g2Fonts.setCursor(91, 182); u8g2Fonts.print("--W");
                 } else {
                     char wBuf[8];
                     snprintf(wBuf, sizeof(wBuf), "%dW", (int)roundf(sensorData.watt));
                     u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                    u8g2Fonts.setCursor(91, 181); u8g2Fonts.print(wBuf);
+                    u8g2Fonts.setCursor(91, 182); u8g2Fonts.print(wBuf);
                 }
             }
-
-            // peak pod barom — y=192
+            // Peak — y=193
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
             {
-                char pkBuf[12];
-                float pk = sensorData.peakWatt;
-                if (pk < PEAK_WATT_MIN_FLOOR) pk = PEAK_WATT_DEFAULT;
-                snprintf(pkBuf, sizeof(pkBuf), "peak %dW", (int)roundf(pk));
-                u8g2Fonts.setCursor(4, 192); u8g2Fonts.print(pkBuf);
+                char pk[12];
+                float p = sensorData.peakWatt;
+                if (p < PEAK_WATT_MIN_FLOOR) p = PEAK_WATT_DEFAULT;
+                snprintf(pk, sizeof(pk), "peak %dW", (int)roundf(p));
+                u8g2Fonts.setCursor(4, 193); u8g2Fonts.print(pk);
             }
         }
 
         // ══════════════════════════════════════════════════════════
-        // CONA 3 — NanoPi: promet, napadi, status
-        // y: 196–296
+        // CONA 3 — NanoPi: status, promet, napadi
+        // y: 198–295  (97px)
+        // ══════════════════════════════════════════════════════════
+        // PRERAČUN PRED IZPISOM:
+        //   status icon center y=203, r=5                                ✓
+        //   status text     y=207: 203+4(pod centrom)+... = 207          ✓
+        //   prom_label y=220: 207+4(spodnji)+9(gap+ascent;gap=...) = 220 ✓
+        //   prom_bar   y=222: 220+2 = 222                                ✓
+        //   prom_val%  y=236: 222+14(bar_h) = 236                        ✓
+        //   prom_sub   y=251: 236+2+13(ascent logo16) = 251              ✓
+        //   nap_label  y=264: 251+1(spodnji logo16~3)+gap=2+9 → 264      ✓ (gap=2, ne 3 — gostejši razpored)
+        //   nap_bar    y=266: 264+2 = 266                                ✓
+        //   nap_val%   y=280: 266+14 = 280                               ✓
+        //   nap_sub    y=295: 280+2+13 = 295  ← zadnji veljavni piksel   ✓
         // ══════════════════════════════════════════════════════════
         {
             NanoPiData nd = nanopiGetData();
 
-            // ── Status vrstica: SIRIUS + banIP ────────────────────────────
-            // Ikona center y=203, r=7. Kljukica = OK, X = fail/unknown
-            // SIRIUS (x center=11)
-            {
-                bool ok = nd.valid && nd.serverOk;
-                display.fillCircle(11, 203, 7, GxEPD_BLACK);
+            // Lambda za risanje statusne ikone (krog r=5, kljukica/X)
+            auto drawStatusIcon = [&](int16_t cx, int16_t cy, bool ok) {
+                display.fillCircle(cx, cy, 5, GxEPD_BLACK);
                 if (ok) {
-                    // kljukica
-                    display.drawLine(7, 203, 10, 207, GxEPD_WHITE);
-                    display.drawLine(10, 207, 16, 197, GxEPD_WHITE);
+                    display.drawLine(cx-3, cy,   cx-1, cy+2, GxEPD_WHITE);
+                    display.drawLine(cx-1, cy+2, cx+4, cy-3, GxEPD_WHITE);
                 } else {
-                    // X
-                    display.drawLine(7, 198, 15, 208, GxEPD_WHITE);
-                    display.drawLine(15, 198, 7, 208, GxEPD_WHITE);
+                    display.drawLine(cx-3, cy-3, cx+3, cy+3, GxEPD_WHITE);
+                    display.drawLine(cx+3, cy-3, cx-3, cy+3, GxEPD_WHITE);
                 }
-                u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(20, 207); u8g2Fonts.print("SIRIUS");
-            }
+            };
 
-            // banIP (x center=75)
-            {
-                bool ok = nd.valid && nd.banipRunning;
-                display.fillCircle(75, 203, 7, GxEPD_BLACK);
-                if (ok) {
-                    display.drawLine(71, 203, 74, 207, GxEPD_WHITE);
-                    display.drawLine(74, 207, 80, 197, GxEPD_WHITE);
-                } else {
-                    display.drawLine(71, 198, 79, 208, GxEPD_WHITE);
-                    display.drawLine(79, 198, 71, 208, GxEPD_WHITE);
-                }
-                u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(84, 207); u8g2Fonts.print("banIP");
-            }
-
-            // ── PROMET bar ────────────────────────────────────────────────
-            // label y=222, bar y=224 (w=84, h=14), 100% tick x=74
-            // val% y=238 (logo16), sub y=253 (logo16 + profont12)
+            // ── Status vrstica: SIRIUS + banIP — center y=203, text y=207 ──
+            drawStatusIcon(11, 203, nd.valid && nd.serverOk);
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4, 222); u8g2Fonts.print("PROMET");
+            u8g2Fonts.setCursor(20, 207); u8g2Fonts.print("SIRIUS");
+
+            drawStatusIcon(75, 203, nd.valid && nd.banipRunning);
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
+            u8g2Fonts.setCursor(84, 207); u8g2Fonts.print("banIP");
+
+            // ── PROMET bar — label y=220, bar y=222–236, sub y=251 ────────
+            u8g2Fonts.setFont(u8g2_font_profont12_mf);
+            u8g2Fonts.setCursor(4, 220); u8g2Fonts.print("PROMET");
 
             {
-                const int16_t bx = 4, by = 224, bw = 84, bh = 14;
+                const int16_t bx = 4, by = 222, bw = 84, bh = 14;
                 // Skala 0–120%: 84px = 120%, fill clamped na bw
                 uint8_t barPct  = nd.valid ? nd.networkBarPct : 0;
                 int16_t fill    = (int16_t)min((int32_t)bw * barPct / 120, (int32_t)bw);
                 drawFancyBar(bx, by, bw, bh, fill);
 
-                // 100% tick = pikčasta navpična črta pri x=74
-                // (100/120)*84 = 70px od levega roba → x = 4+70 = 74
-                for (int16_t ty = by + 2; ty < by + bh - 2; ty += 2) {
-                    display.drawPixel(74, ty, GxEPD_WHITE);  // pika v fill barvi
-                }
-                // Popravi barvo ticka glede na fill
+                // 100% tick = pikčasta navpična črta pri x=74 (=4 + 84*100/120)
                 uint16_t tickCol = (fill > 70) ? GxEPD_WHITE : GxEPD_BLACK;
                 for (int16_t ty = by + 2; ty < by + bh - 2; ty += 2) {
                     display.drawPixel(74, ty, tickCol);
                 }
 
-                // bar_pct vrednost desno (logo16) — y=238
                 char pBuf[6];
                 snprintf(pBuf, sizeof(pBuf), "%d%%", barPct);
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(91, 238); u8g2Fonts.print(pBuf);
+                u8g2Fonts.setCursor(91, 236); u8g2Fonts.print(pBuf);
             }
 
-            // Pod barom: logo16 za trenutno vrednost + profont12 za enoto+peak
-            // Oba na isti baseline y=253
+            // Pod barom: logo16 trenutna vrednost + profont12 enota+peak — y=251
             {
                 char curBuf[8], restBuf[24];
                 if (!nd.valid) {
@@ -495,38 +448,34 @@ void updateDisplay(bool fullRefresh) {
                     snprintf(restBuf, sizeof(restBuf), " Mb/s  peak %.2f", nd.networkPeakMbits);
                 }
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 253); u8g2Fonts.print(curBuf);
+                u8g2Fonts.setCursor(4, 251); u8g2Fonts.print(curBuf);
                 int16_t xAfter = 4 + u8g2Fonts.getUTF8Width(curBuf);
                 u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(xAfter, 253); u8g2Fonts.print(restBuf);
+                u8g2Fonts.setCursor(xAfter, 251); u8g2Fonts.print(restBuf);
             }
 
-            // ── NAPADI bar ────────────────────────────────────────────────
-            // label y=265, bar y=267 (w=84, h=14), 100% tick x=74
-            // val% y=281 (logo16), sub y=296 (logo16 + profont12)
+            // ── NAPADI bar — label y=264, bar y=266–280, sub y=295 ────────
             u8g2Fonts.setFont(u8g2_font_profont12_mf);
-            u8g2Fonts.setCursor(4, 265); u8g2Fonts.print("NAPADI");
+            u8g2Fonts.setCursor(4, 264); u8g2Fonts.print("NAPADI");
 
             {
-                const int16_t bx = 4, by = 267, bw = 84, bh = 14;
+                const int16_t bx = 4, by = 266, bw = 84, bh = 14;
                 uint8_t barPct  = nd.valid ? nd.attacksBarPct : 0;
                 int16_t fill    = (int16_t)min((int32_t)bw * barPct / 120, (int32_t)bw);
                 drawFancyBar(bx, by, bw, bh, fill);
 
-                // 100% tick (isti vzorec kot PROMET)
                 uint16_t tickCol = (fill > 70) ? GxEPD_WHITE : GxEPD_BLACK;
                 for (int16_t ty = by + 2; ty < by + bh - 2; ty += 2) {
                     display.drawPixel(74, ty, tickCol);
                 }
 
-                // bar_pct vrednost desno — y=281
                 char pBuf[6];
                 snprintf(pBuf, sizeof(pBuf), "%d%%", barPct);
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(91, 281); u8g2Fonts.print(pBuf);
+                u8g2Fonts.setCursor(91, 280); u8g2Fonts.print(pBuf);
             }
 
-            // Pod barom: logo16 + profont12 na baseline y=296
+            // Pod barom: logo16 + profont12 na baseline y=295 (zadnji veljavni piksel)
             {
                 char curBuf[8], restBuf[24];
                 if (!nd.valid) {
@@ -537,16 +486,15 @@ void updateDisplay(bool fullRefresh) {
                     snprintf(restBuf, sizeof(restBuf), " /h  peak %lu", (unsigned long)nd.attacksPeakPh);
                 }
                 u8g2Fonts.setFont(u8g2_font_logisoso16_tf);
-                u8g2Fonts.setCursor(4, 296); u8g2Fonts.print(curBuf);
+                u8g2Fonts.setCursor(4, 295); u8g2Fonts.print(curBuf);
                 int16_t xAfter = 4 + u8g2Fonts.getUTF8Width(curBuf);
                 u8g2Fonts.setFont(u8g2_font_profont12_mf);
-                u8g2Fonts.setCursor(xAfter, 296); u8g2Fonts.print(restBuf);
+                u8g2Fonts.setCursor(xAfter, 295); u8g2Fonts.print(restBuf);
             }
 
-            // stale indikator — invertiran piksel v zgornjem desnem kotu Cone 3
-            // (majhen vizualni namig brez dodatnega prostora)
+            // stale indikator — invertiran kvadratek v zgornjem desnem kotu Cone 3
             if (nd.stale && nd.valid) {
-                display.fillRect(122, 196, 6, 6, GxEPD_BLACK);
+                display.fillRect(122, 198, 6, 6, GxEPD_BLACK);
             }
         }
 
