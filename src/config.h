@@ -135,7 +135,7 @@ enum ErrorFlag : uint8_t {
 #define MDNS_HOSTNAME       "fan"   // http://fan.local
 
 // --- Firmware verzija ---
-#define FW_VERSION          "1.3.2"
+#define FW_VERSION          "1.3.3"
 
 // --- RGB LED (vgrajena na TZT ESP32-S3-N16R8) ---
 // POZOR: GPIO38=FSPIQ in GPIO48=FSPICLK sta rezervirana za OPI PSRAM (qio_opi).
